@@ -58,10 +58,25 @@ def normalize_mac(mac: str) -> str:
     Home Assistant stores Bluetooth MAC addresses in uppercase format
     with colons as separators (e.g., "A4:C1:38:12:34:56").
 
+    This function handles various input formats:
+    - aa:bb:cc:dd:ee:ff (lowercase with colons)
+    - AA-BB-CC-DD-EE-FF (uppercase with dashes)
+    - aabbccddeeff (no separators)
+    - AA.BB.CC.DD.EE.FF (with dots)
+
     Args:
-        mac: MAC address in any case
+        mac: MAC address in any format
 
     Returns:
-        MAC address in uppercase
+        MAC address in uppercase with colons (XX:XX:XX:XX:XX:XX)
     """
+    # Remove any separators and convert to uppercase
+    mac_clean = mac.replace(":", "").replace("-", "").replace(".", "").upper()
+
+    # Add colons every 2 characters if we have exactly 12 hex characters
+    if len(mac_clean) == 12:
+        return ":".join(mac_clean[i : i + 2] for i in range(0, 12, 2))
+
+    # If already formatted or invalid length, just uppercase
+    # This handles the case where the MAC is already in XX:XX:XX:XX:XX:XX format
     return mac.upper()

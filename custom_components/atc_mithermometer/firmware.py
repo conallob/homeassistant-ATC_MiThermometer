@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,6 +14,7 @@ from bleak import BleakClient, BleakError
 from homeassistant.components import bluetooth
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     CHAR_UUID_OTA_CONTROL,
@@ -43,7 +45,9 @@ class FirmwareManager:
         """Initialize firmware manager."""
         self.hass = hass
         self.mac_address = mac_address
-        self._session: aiohttp.ClientSession | None = None
+        # Use Home Assistant's shared aiohttp session instead of creating our own
+        # This is automatically cleaned up by Home Assistant
+        self._session = async_get_clientsession(hass)
 
     async def get_latest_release(
         self, firmware_source: str
@@ -58,9 +62,6 @@ class FirmwareManager:
         asset_pattern = source_info["asset_pattern"]
 
         try:
-            if self._session is None:
-                self._session = aiohttp.ClientSession()
-
             async with self._session.get(api_url, timeout=aiohttp.ClientTimeout(total=30)) as response:
                 if response.status != 200:
                     _LOGGER.error(
@@ -98,16 +99,13 @@ class FirmwareManager:
         except aiohttp.ClientError as err:
             _LOGGER.error("Error fetching firmware release: %s", err)
             return None
-        except Exception as err:
-            _LOGGER.exception("Unexpected error fetching firmware release: %s", err)
+        except (KeyError, ValueError) as err:
+            _LOGGER.error("Error parsing firmware release data: %s", err)
             return None
 
     async def download_firmware(self, download_url: str) -> bytes | None:
         """Download firmware binary from URL."""
         try:
-            if self._session is None:
-                self._session = aiohttp.ClientSession()
-
             async with self._session.get(
                 download_url, timeout=aiohttp.ClientTimeout(total=60)
             ) as response:
@@ -135,7 +133,7 @@ class FirmwareManager:
     async def flash_firmware(
         self,
         firmware_data: bytes,
-        progress_callback: callable[[int, int], None] | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> bool:
         """Flash firmware to device via BLE OTA.
 
@@ -203,8 +201,8 @@ class FirmwareManager:
         except asyncio.TimeoutError:
             _LOGGER.error("Timeout during firmware flash")
             return False
-        except Exception as err:
-            _LOGGER.exception("Unexpected error during firmware flash: %s", err)
+        except HomeAssistantError as err:
+            _LOGGER.error("Home Assistant error during firmware flash: %s", err)
             return False
 
     async def _start_ota_mode(self, client: BleakClient) -> None:
@@ -268,9 +266,3 @@ class FirmwareManager:
         except Exception as err:
             _LOGGER.debug("Error getting current version: %s", err)
             return None
-
-    async def close(self) -> None:
-        """Close the firmware manager and cleanup resources."""
-        if self._session:
-            await self._session.close()
-            self._session = None

@@ -85,6 +85,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Note: We don't remove the config entry from the device here
         # because the device is shared with BTHome integration.
         # Home Assistant will handle cleanup automatically.
+        # FirmwareManager uses Home Assistant's shared session, so no cleanup needed.
 
     return unload_ok
 
@@ -190,12 +191,10 @@ async def get_bthome_device_by_mac(
         return None
 
     # Verify it's a BTHome device by checking if any config entry belongs to BTHome
-    if any(
-        (entry := hass.config_entries.async_get_entry(entry_id))
-        and entry.domain == BTHOME_DOMAIN
-        for entry_id in device.config_entries
-    ):
-        return device
+    for entry_id in device.config_entries:
+        entry = hass.config_entries.async_get_entry(entry_id)
+        if entry and entry.domain == BTHOME_DOMAIN:
+            return device
 
     return None
 
