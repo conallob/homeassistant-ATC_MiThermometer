@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  update-manifest:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.target_commitish }}
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          # Remove 'v' prefix from tag (e.g., v1.2.3 -> 1.2.3)
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Extracted version: $VERSION"
+
+      - name: Update manifest.json
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          MANIFEST="custom_components/atc_mithermometer/manifest.json"
+
+          # Update version in manifest.json using jq
+          jq --arg version "$VERSION" '.version = $version' "$MANIFEST" > "$MANIFEST.tmp"
+          mv "$MANIFEST.tmp" "$MANIFEST"
+
+          echo "Updated manifest.json to version $VERSION"
+          cat "$MANIFEST"
+
+      - name: Commit and push changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add custom_components/atc_mithermometer/manifest.json
+
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          git commit -m "chore: update manifest.json to version ${{ steps.version.outputs.version }}"
+          git push origin HEAD:${{ github.event.release.target_commitish }}
+
+      - name: Create release asset zip
+        run: |
+          cd custom_components
+          zip -r ../atc_mithermometer-${{ steps.version.outputs.version }}.zip atc_mithermometer/
+          cd ..
+
+      - name: Upload release asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ./atc_mithermometer-${{ steps.version.outputs.version }}.zip
+          asset_name: atc_mithermometer-${{ steps.version.outputs.version }}.zip
+          asset_content_type: application/zip

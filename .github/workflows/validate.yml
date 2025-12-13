@@ -1,0 +1,68 @@
+name: Validate
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    name: Validate integration
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install homeassistant
+          pip install -r custom_components/atc_mithermometer/requirements.txt || true
+
+      - name: Install Home Assistant requirements
+        run: |
+          pip install bleak>=0.21.0 aiohttp>=3.9.0 voluptuous
+
+      - name: Run hassfest
+        uses: home-assistant/actions/hassfest@master
+
+      - name: Validate Python syntax
+        run: |
+          python -m py_compile custom_components/atc_mithermometer/*.py
+
+      - name: Validate manifest.json
+        run: |
+          python -c "import json; json.load(open('custom_components/atc_mithermometer/manifest.json'))"
+
+      - name: Validate strings.json
+        run: |
+          python -c "import json; json.load(open('custom_components/atc_mithermometer/strings.json'))"
+
+  lint:
+    runs-on: ubuntu-latest
+    name: Lint with ruff
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff
+        run: ruff check custom_components/atc_mithermometer/
+        continue-on-error: true
