@@ -109,15 +109,24 @@ async def get_atc_devices_from_bthome(hass: HomeAssistant) -> list[DeviceEntry]:
     """Get list of ATC MiThermometer devices from BTHome integration."""
     device_registry = dr.async_get(hass)
     atc_devices = []
+    seen_device_ids = set()
 
     # Get all devices from all BTHome config entries
+    # Use a set to track device IDs to avoid duplicates when a device
+    # is associated with multiple BTHome config entries
     for entry in hass.config_entries.async_entries(BTHOME_DOMAIN):
         devices = dr.async_entries_for_config_entry(device_registry, entry.entry_id)
         for device in devices:
             # Check if device matches ATC MiThermometer characteristics
-            if device.name and any(
-                device.name.startswith(prefix) for prefix in ATC_NAME_PREFIXES
+            # and hasn't been added yet
+            if (
+                device.id not in seen_device_ids
+                and device.name
+                and any(
+                    device.name.startswith(prefix) for prefix in ATC_NAME_PREFIXES
+                )
             ):
+                seen_device_ids.add(device.id)
                 atc_devices.append(device)
 
     return atc_devices
