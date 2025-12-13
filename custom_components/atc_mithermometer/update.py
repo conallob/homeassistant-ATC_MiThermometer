@@ -145,7 +145,12 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
             # Use the existing BTHome device's identifiers to link our entity
             # Add our domain to the existing identifiers so both integrations
             # can manage the same device
-            identifiers = set(bthome_device.identifiers) | {(DOMAIN, self._mac_address)}
+            # Create explicit copy to avoid mutating BTHome device's identifiers
+            # Normalize MAC address to uppercase (Home Assistant standard)
+            mac_normalized = self._mac_address.upper()
+            identifiers = set(bthome_device.identifiers).copy() | {
+                (DOMAIN, mac_normalized)
+            }
 
             self._attr_device_info = DeviceInfo(
                 identifiers=identifiers,
@@ -158,12 +163,14 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
             )
         else:
             # Fallback: create standalone device if BTHome device not found
+            # Normalize MAC address to uppercase (Home Assistant standard)
+            mac_normalized = self._mac_address.upper()
             self._attr_device_info = DeviceInfo(
-                identifiers={(DOMAIN, self._mac_address)},
-                name=f"ATC MiThermometer {self._mac_address[-5:]}",
+                identifiers={(DOMAIN, mac_normalized)},
+                name=f"ATC MiThermometer {mac_normalized[-5:]}",
                 manufacturer="Custom",
                 model="ATC MiThermometer",
-                connections={(dr.CONNECTION_BLUETOOTH, self._mac_address)},
+                connections={(dr.CONNECTION_BLUETOOTH, mac_normalized)},
             )
             _LOGGER.warning(
                 "BTHome device not found for %s, creating standalone device",

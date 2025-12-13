@@ -43,14 +43,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if bthome_device:
         # Add our config entry to the existing device
-        device_registry.async_update_device(
-            bthome_device.id, add_config_entry_id=entry.entry_id
-        )
-        _LOGGER.debug(
-            "Linked config entry %s to existing BTHome device %s",
-            entry.entry_id,
-            mac_address,
-        )
+        try:
+            device_registry.async_update_device(
+                bthome_device.id, add_config_entry_id=entry.entry_id
+            )
+            _LOGGER.debug(
+                "Linked config entry %s to existing BTHome device %s",
+                entry.entry_id,
+                mac_address,
+            )
+        except Exception as err:
+            _LOGGER.warning(
+                "Failed to link config entry to BTHome device %s: %s. "
+                "Entity will create standalone device.",
+                mac_address,
+                err,
+            )
+            # Continue setup anyway - entity will create standalone device as fallback
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -155,12 +164,24 @@ async def get_bthome_device_by_mac(
 
     This allows us to link our entities to the existing BTHome device
     instead of creating a duplicate device entry.
+
+    Args:
+        hass: Home Assistant instance
+        mac_address: Bluetooth MAC address in Home Assistant's standard format
+                     (uppercase with colons, e.g., "A4:C1:38:12:34:56")
+
+    Returns:
+        BTHome device entry if found, None otherwise
     """
     device_registry = dr.async_get(hass)
 
+    # Normalize MAC address to uppercase (Home Assistant standard)
+    # Bluetooth integration stores MAC addresses in uppercase format
+    mac_normalized = mac_address.upper()
+
     # Find device by bluetooth connection
     device = device_registry.async_get_device(
-        connections={(dr.CONNECTION_BLUETOOTH, mac_address)}
+        connections={(dr.CONNECTION_BLUETOOTH, mac_normalized)}
     )
 
     if not device:
