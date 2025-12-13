@@ -1,0 +1,136 @@
+"""The ATC MiThermometer Manager integration."""
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from homeassistant.components import bluetooth
+from homeassistant.components.bthome import DOMAIN as BTHOME_DOMAIN
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.device_registry import DeviceEntry
+
+from .const import (
+    ATC_NAME_PREFIXES,
+    CONF_FIRMWARE_SOURCE,
+    CONF_MAC_ADDRESS,
+    DOMAIN,
+    PVVX_DEVICE_TYPE,
+    SERVICE_UUID_ENVIRONMENTAL,
+)
+
+_LOGGER = logging.getLogger(__name__)
+
+PLATFORMS: list[Platform] = [Platform.UPDATE]
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up ATC MiThermometer Manager from a config entry."""
+    hass.data.setdefault(DOMAIN, {})
+
+    # Store config entry data
+    hass.data[DOMAIN][entry.entry_id] = {
+        CONF_FIRMWARE_SOURCE: entry.data[CONF_FIRMWARE_SOURCE],
+        CONF_MAC_ADDRESS: entry.data[CONF_MAC_ADDRESS],
+    }
+
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Set up listener for device updates
+    entry.async_on_unload(
+        hass.bus.async_listen(
+            f"{BTHOME_DOMAIN}_device_update",
+            lambda event: _handle_bthome_update(hass, entry, event),
+        )
+    )
+
+    return True
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Unload a config entry."""
+    if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+        hass.data[DOMAIN].pop(entry.entry_id)
+
+    return unload_ok
+
+
+@callback
+def _handle_bthome_update(
+    hass: HomeAssistant, entry: ConfigEntry, event: Any
+) -> None:
+    """Handle BTHome device updates."""
+    # This allows us to react to BTHome device state changes if needed
+    _LOGGER.debug("BTHome device update: %s", event.data)
+
+
+def is_atc_mithermometer(device_name: str | None, service_uuids: list[str]) -> bool:
+    """Check if a device is an ATC MiThermometer.
+
+    Identifies devices by:
+    - Name prefix (ATC_, LYWSD03MMC)
+    - Environmental sensing service UUID
+    """
+    if device_name:
+        for prefix in ATC_NAME_PREFIXES:
+            if device_name.startswith(prefix):
+                return True
+
+    # Check for environmental sensing service
+    if SERVICE_UUID_ENVIRONMENTAL.lower() in [uuid.lower() for uuid in service_uuids]:
+        return True
+
+    return False
+
+
+async def get_atc_devices_from_bthome(hass: HomeAssistant) -> list[DeviceEntry]:
+    """Get list of ATC MiThermometer devices from BTHome integration."""
+    device_registry = dr.async_get(hass)
+    atc_devices = []
+
+    # Get all devices
+    devices = dr.async_entries_for_config_entry(
+        device_registry,
+        hass.config_entries.async_entries(BTHOME_DOMAIN)
+    )
+
+    for device in devices:
+        # Check if device matches ATC MiThermometer characteristics
+        if device.name and any(
+            device.name.startswith(prefix) for prefix in ATC_NAME_PREFIXES
+        ):
+            atc_devices.append(device)
+
+    return atc_devices
+
+
+async def get_device_mac_address(hass: HomeAssistant, device_id: str) -> str | None:
+    """Get MAC address for a device."""
+    device_registry = dr.async_get(hass)
+    device = device_registry.async_get(device_id)
+
+    if not device or not device.connections:
+        return None
+
+    # Extract MAC address from device connections
+    for connection in device.connections:
+        if connection[0] == dr.CONNECTION_BLUETOOTH:
+            return connection[1]
+
+    return None
+
+
+async def get_current_firmware_version(
+    hass: HomeAssistant, mac_address: str
+) -> str | None:
+    """Get current firmware version from device.
+
+    This would typically be parsed from BLE advertisements or
+    read from a device characteristic.
+    """
+    # TODO: Implement version detection from BLE
+    # For now, return None - will be implemented in firmware.py
+    _LOGGER.debug("Getting firmware version for %s", mac_address)
+    return None

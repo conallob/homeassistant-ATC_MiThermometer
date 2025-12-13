@@ -1,0 +1,91 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Select ATC MiThermometer Device",
+        "description": "Found {device_count} compatible device(s). Select a device to manage.",
+        "data": {
+          "mac_address": "Device"
+        }
+      },
+      "firmware_source": {
+        "title": "Select Firmware Source",
+        "description": "Choose which firmware variant to use for device: {device}",
+        "data": {
+          "firmware_source": "Firmware Source"
+        },
+        "data_description": {
+          "firmware_source": "pvvx is the most actively maintained fork with additional features. atc1441 is the original implementation."
+        }
+      },
+      "bluetooth_confirm": {
+        "title": "Discovered ATC MiThermometer",
+        "description": "Device: {name}\nAddress: {address}\n\nDo you want to add this device?"
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to device",
+      "unknown": "Unexpected error occurred",
+      "no_devices_found": "No ATC MiThermometer devices found"
+    },
+    "abort": {
+      "already_configured": "This device is already configured",
+      "no_devices_found": "No ATC MiThermometer devices found. Make sure your devices are powered on and in range.",
+      "not_supported": "This device is not an ATC MiThermometer"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "ATC MiThermometer Options",
+        "description": "Configure firmware source preference",
+        "data": {
+          "firmware_source": "Firmware Source"
+        }
+      }
+    }
+  },
+  "entity": {
+    "update": {
+      "firmware_update": {
+        "name": "Firmware Update"
+      }
+    }
+  },
+  "issues": {
+    "firmware_update_available": {
+      "title": "Firmware update available for {device_name}",
+      "description": "A new firmware version ({new_version}) is available for your ATC MiThermometer device.\n\nCurrent version: {current_version}\nNew version: {new_version}\n\nYou can install the update from the device's firmware update entity."
+    }
+  },
+  "services": {
+    "flash_firmware": {
+      "name": "Flash Firmware",
+      "description": "Manually flash firmware to an ATC MiThermometer device",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "The device to update"
+        },
+        "firmware_source": {
+          "name": "Firmware Source",
+          "description": "Which firmware variant to use"
+        },
+        "version": {
+          "name": "Version",
+          "description": "Specific version to install (optional, defaults to latest)"
+        }
+      }
+    },
+    "check_updates": {
+      "name": "Check for Updates",
+      "description": "Check for firmware updates for all configured devices",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "Specific device to check (optional, checks all if not specified)"
+        }
+      }
+    }
+  }
+}

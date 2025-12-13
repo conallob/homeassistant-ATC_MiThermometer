@@ -1,0 +1,261 @@
+"""Update platform for ATC MiThermometer Manager integration."""
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from homeassistant.components.update import (
+    UpdateDeviceClass,
+    UpdateEntity,
+    UpdateEntityFeature,
+)
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import (
+    CoordinatorEntity,
+    DataUpdateCoordinator,
+    UpdateFailed,
+)
+
+from .const import (
+    ATTR_CURRENT_VERSION,
+    ATTR_FIRMWARE_SOURCE,
+    ATTR_LATEST_VERSION,
+    ATTR_RELEASE_URL,
+    CONF_FIRMWARE_SOURCE,
+    CONF_MAC_ADDRESS,
+    DOMAIN,
+    FIRMWARE_SOURCES,
+    UPDATE_CHECK_INTERVAL,
+)
+from .firmware import FirmwareManager, FirmwareRelease
+
+_LOGGER = logging.getLogger(__name__)
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up ATC MiThermometer update entities."""
+    mac_address = entry.data[CONF_MAC_ADDRESS]
+    firmware_source = entry.data[CONF_FIRMWARE_SOURCE]
+
+    firmware_manager = FirmwareManager(hass, mac_address)
+
+    # Create coordinator for checking updates
+    coordinator = ATCUpdateCoordinator(
+        hass,
+        firmware_manager,
+        firmware_source,
+        mac_address,
+    )
+
+    # Fetch initial data
+    await coordinator.async_config_entry_first_refresh()
+
+    async_add_entities(
+        [ATCMiThermometerUpdate(coordinator, entry, firmware_manager)],
+        True,
+    )
+
+
+class ATCUpdateCoordinator(DataUpdateCoordinator):
+    """Coordinator for checking firmware updates."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        firmware_manager: FirmwareManager,
+        firmware_source: str,
+        mac_address: str,
+    ) -> None:
+        """Initialize coordinator."""
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=f"ATC MiThermometer {mac_address}",
+            update_interval=UPDATE_CHECK_INTERVAL,
+        )
+        self.firmware_manager = firmware_manager
+        self.firmware_source = firmware_source
+        self.mac_address = mac_address
+
+    async def _async_update_data(self) -> dict[str, Any]:
+        """Fetch latest firmware info."""
+        try:
+            # Get current version from device
+            current_version = await self.firmware_manager.get_current_version()
+
+            # Get latest release info
+            latest_release = await self.firmware_manager.get_latest_release(
+                self.firmware_source
+            )
+
+            if not latest_release:
+                raise UpdateFailed("Failed to fetch latest release info")
+
+            return {
+                ATTR_CURRENT_VERSION: current_version,
+                ATTR_LATEST_VERSION: latest_release.version,
+                "latest_release": latest_release,
+                ATTR_FIRMWARE_SOURCE: self.firmware_source,
+            }
+
+        except Exception as err:
+            raise UpdateFailed(f"Error fetching update data: {err}") from err
+
+
+class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
+    """Update entity for ATC MiThermometer firmware."""
+
+    _attr_device_class = UpdateDeviceClass.FIRMWARE
+    _attr_supported_features = (
+        UpdateEntityFeature.INSTALL
+        | UpdateEntityFeature.PROGRESS
+        | UpdateEntityFeature.RELEASE_NOTES
+    )
+
+    def __init__(
+        self,
+        coordinator: ATCUpdateCoordinator,
+        entry: ConfigEntry,
+        firmware_manager: FirmwareManager,
+    ) -> None:
+        """Initialize the update entity."""
+        super().__init__(coordinator)
+        self._firmware_manager = firmware_manager
+        self._mac_address = entry.data[CONF_MAC_ADDRESS]
+        self._attr_unique_id = f"{self._mac_address}_firmware_update"
+        self._attr_name = "Firmware Update"
+        self._install_progress = 0
+
+        # Device info
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self._mac_address)},
+            name=f"ATC MiThermometer {self._mac_address[-5:]}",
+            manufacturer="Custom",
+            model="ATC MiThermometer",
+            connections={(("bluetooth", self._mac_address),)},
+        )
+
+    @property
+    def installed_version(self) -> str | None:
+        """Return the current installed version."""
+        return self.coordinator.data.get(ATTR_CURRENT_VERSION)
+
+    @property
+    def latest_version(self) -> str | None:
+        """Return the latest available version."""
+        return self.coordinator.data.get(ATTR_LATEST_VERSION)
+
+    @property
+    def release_url(self) -> str | None:
+        """Return the release URL."""
+        latest_release: FirmwareRelease | None = self.coordinator.data.get(
+            "latest_release"
+        )
+        return latest_release.release_url if latest_release else None
+
+    @property
+    def release_summary(self) -> str | None:
+        """Return the release notes."""
+        latest_release: FirmwareRelease | None = self.coordinator.data.get(
+            "latest_release"
+        )
+        return latest_release.release_notes if latest_release else None
+
+    @property
+    def in_progress(self) -> bool | int:
+        """Return the installation progress."""
+        if self._install_progress > 0:
+            return self._install_progress
+        return False
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return extra state attributes."""
+        return {
+            ATTR_FIRMWARE_SOURCE: self.coordinator.data.get(ATTR_FIRMWARE_SOURCE),
+            "firmware_source_name": FIRMWARE_SOURCES.get(
+                self.coordinator.data.get(ATTR_FIRMWARE_SOURCE, ""), {}
+            ).get("name", "Unknown"),
+        }
+
+    async def async_install(
+        self, version: str | None, backup: bool, **kwargs: Any
+    ) -> None:
+        """Install firmware update."""
+        latest_release: FirmwareRelease | None = self.coordinator.data.get(
+            "latest_release"
+        )
+
+        if not latest_release:
+            raise HomeAssistantError("No firmware release available")
+
+        _LOGGER.info(
+            "Starting firmware installation for %s: %s",
+            self._mac_address,
+            latest_release.version,
+        )
+
+        try:
+            # Download firmware
+            self._install_progress = 10
+            self.async_write_ha_state()
+
+            firmware_data = await self._firmware_manager.download_firmware(
+                latest_release.download_url
+            )
+
+            if not firmware_data:
+                raise HomeAssistantError("Failed to download firmware")
+
+            self._install_progress = 30
+            self.async_write_ha_state()
+
+            # Flash firmware
+            def progress_callback(current: int, total: int) -> None:
+                """Update progress during flash."""
+                # Map progress from 30% to 90%
+                progress = 30 + int((current / total) * 60)
+                self._install_progress = progress
+                self.async_write_ha_state()
+
+            success = await self._firmware_manager.flash_firmware(
+                firmware_data, progress_callback
+            )
+
+            if not success:
+                raise HomeAssistantError("Firmware flash failed")
+
+            self._install_progress = 100
+            self.async_write_ha_state()
+
+            # Wait a bit for device to reboot, then refresh
+            await self.coordinator.async_request_refresh()
+
+        except Exception as err:
+            _LOGGER.error("Error installing firmware: %s", err)
+            raise HomeAssistantError(f"Installation failed: {err}") from err
+        finally:
+            self._install_progress = 0
+            self.async_write_ha_state()
+
+    @callback
+    def async_create_repair_issue(self) -> None:
+        """Create a repair issue for available update."""
+        if self.installed_version and self.latest_version:
+            if self.installed_version != self.latest_version:
+                # This would integrate with HA's repairs system
+                # to notify users of available updates
+                _LOGGER.info(
+                    "Firmware update available for %s: %s -> %s",
+                    self._mac_address,
+                    self.installed_version,
+                    self.latest_version,
+                )
