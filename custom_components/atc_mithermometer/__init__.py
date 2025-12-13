@@ -19,6 +19,7 @@ from .const import (
     DOMAIN,
     PVVX_DEVICE_TYPE,
     SERVICE_UUID_ENVIRONMENTAL,
+    normalize_mac,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -37,6 +38,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
 
     # Link this config entry to the existing BTHome device
+    # This must happen before platform setup so that when the update entity
+    # is created, it can properly reference the shared device and avoid
+    # creating duplicate device entries
     mac_address = entry.data[CONF_MAC_ADDRESS]
     device_registry = dr.async_get(hass)
     bthome_device = await get_bthome_device_by_mac(hass, mac_address)
@@ -47,12 +51,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             device_registry.async_update_device(
                 bthome_device.id, add_config_entry_id=entry.entry_id
             )
-            _LOGGER.debug(
-                "Linked config entry %s to existing BTHome device %s",
-                entry.entry_id,
+            _LOGGER.info(
+                "Linked config entry to existing BTHome device %s",
                 mac_address,
             )
-        except Exception as err:
+        except (ValueError, KeyError, AttributeError) as err:
             _LOGGER.warning(
                 "Failed to link config entry to BTHome device %s: %s. "
                 "Entity will create standalone device.",
@@ -167,17 +170,16 @@ async def get_bthome_device_by_mac(
 
     Args:
         hass: Home Assistant instance
-        mac_address: Bluetooth MAC address in Home Assistant's standard format
-                     (uppercase with colons, e.g., "A4:C1:38:12:34:56")
+        mac_address: Bluetooth MAC address in any format
+                     (will be normalized to uppercase)
 
     Returns:
         BTHome device entry if found, None otherwise
     """
     device_registry = dr.async_get(hass)
 
-    # Normalize MAC address to uppercase (Home Assistant standard)
-    # Bluetooth integration stores MAC addresses in uppercase format
-    mac_normalized = mac_address.upper()
+    # Normalize MAC address to Home Assistant standard format
+    mac_normalized = normalize_mac(mac_address)
 
     # Find device by bluetooth connection
     device = device_registry.async_get_device(
@@ -187,11 +189,13 @@ async def get_bthome_device_by_mac(
     if not device:
         return None
 
-    # Verify it's a BTHome device
-    for entry_id in device.config_entries:
-        entry = hass.config_entries.async_get_entry(entry_id)
-        if entry and entry.domain == BTHOME_DOMAIN:
-            return device
+    # Verify it's a BTHome device by checking if any config entry belongs to BTHome
+    if any(
+        (entry := hass.config_entries.async_get_entry(entry_id))
+        and entry.domain == BTHOME_DOMAIN
+        for entry_id in device.config_entries
+    ):
+        return device
 
     return None
 

@@ -50,3 +50,18 @@ ATTR_LATEST_VERSION: Final = "latest_version"
 ATTR_FIRMWARE_SOURCE: Final = "firmware_source"
 ATTR_RELEASE_URL: Final = "release_url"
 ATTR_INSTALLED_VERSION: Final = "installed_version"
+
+
+def normalize_mac(mac: str) -> str:
+    """Normalize MAC address to Home Assistant standard format.
+
+    Home Assistant stores Bluetooth MAC addresses in uppercase format
+    with colons as separators (e.g., "A4:C1:38:12:34:56").
+
+    Args:
+        mac: MAC address in any case
+
+    Returns:
+        MAC address in uppercase
+    """
+    return mac.upper()

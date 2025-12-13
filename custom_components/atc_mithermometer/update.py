@@ -32,6 +32,7 @@ from .const import (
     DOMAIN,
     FIRMWARE_SOURCES,
     UPDATE_CHECK_INTERVAL,
+    normalize_mac,
 )
 from .firmware import FirmwareManager, FirmwareRelease
 
@@ -146,9 +147,8 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
             # Add our domain to the existing identifiers so both integrations
             # can manage the same device
             # Create explicit copy to avoid mutating BTHome device's identifiers
-            # Normalize MAC address to uppercase (Home Assistant standard)
-            mac_normalized = self._mac_address.upper()
-            identifiers = set(bthome_device.identifiers).copy() | {
+            mac_normalized = normalize_mac(self._mac_address)
+            identifiers: set[tuple[str, str]] = set(bthome_device.identifiers) | {
                 (DOMAIN, mac_normalized)
             }
 
@@ -163,8 +163,7 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
             )
         else:
             # Fallback: create standalone device if BTHome device not found
-            # Normalize MAC address to uppercase (Home Assistant standard)
-            mac_normalized = self._mac_address.upper()
+            mac_normalized = normalize_mac(self._mac_address)
             self._attr_device_info = DeviceInfo(
                 identifiers={(DOMAIN, mac_normalized)},
                 name=f"ATC MiThermometer {mac_normalized[-5:]}",
