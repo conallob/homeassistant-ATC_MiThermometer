@@ -14,12 +14,14 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
     DataUpdateCoordinator,
     UpdateFailed,
 )
 
+from . import get_bthome_device_by_mac
 from .const import (
     ATTR_CURRENT_VERSION,
     ATTR_FIRMWARE_SOURCE,
@@ -47,6 +49,9 @@ async def async_setup_entry(
 
     firmware_manager = FirmwareManager(hass, mac_address)
 
+    # Get the existing BTHome device to link to
+    bthome_device = await get_bthome_device_by_mac(hass, mac_address)
+
     # Create coordinator for checking updates
     coordinator = ATCUpdateCoordinator(
         hass,
@@ -59,7 +64,7 @@ async def async_setup_entry(
     await coordinator.async_config_entry_first_refresh()
 
     async_add_entities(
-        [ATCMiThermometerUpdate(coordinator, entry, firmware_manager)],
+        [ATCMiThermometerUpdate(coordinator, entry, firmware_manager, bthome_device)],
         True,
     )
 
@@ -125,6 +130,7 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
         coordinator: ATCUpdateCoordinator,
         entry: ConfigEntry,
         firmware_manager: FirmwareManager,
+        bthome_device: dr.DeviceEntry | None = None,
     ) -> None:
         """Initialize the update entity."""
         super().__init__(coordinator)
@@ -134,14 +140,36 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
         self._attr_name = "Firmware Update"
         self._install_progress = 0
 
-        # Device info
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self._mac_address)},
-            name=f"ATC MiThermometer {self._mac_address[-5:]}",
-            manufacturer="Custom",
-            model="ATC MiThermometer",
-            connections={(("bluetooth", self._mac_address),)},
-        )
+        # Device info - link to existing BTHome device if available
+        if bthome_device:
+            # Use the existing BTHome device's identifiers to link our entity
+            # Add our domain to the existing identifiers so both integrations
+            # can manage the same device
+            identifiers = set(bthome_device.identifiers)
+            identifiers.add((DOMAIN, self._mac_address))
+
+            self._attr_device_info = DeviceInfo(
+                identifiers=identifiers,
+                connections=bthome_device.connections,
+            )
+            _LOGGER.debug(
+                "Linking to existing BTHome device %s with identifiers: %s",
+                self._mac_address,
+                identifiers,
+            )
+        else:
+            # Fallback: create standalone device if BTHome device not found
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, self._mac_address)},
+                name=f"ATC MiThermometer {self._mac_address[-5:]}",
+                manufacturer="Custom",
+                model="ATC MiThermometer",
+                connections={(("bluetooth", self._mac_address),)},
+            )
+            _LOGGER.warning(
+                "BTHome device not found for %s, creating standalone device",
+                self._mac_address,
+            )
 
     @property
     def installed_version(self) -> str | None:

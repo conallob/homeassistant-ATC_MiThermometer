@@ -36,6 +36,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         CONF_MAC_ADDRESS: entry.data[CONF_MAC_ADDRESS],
     }
 
+    # Link this config entry to the existing BTHome device
+    mac_address = entry.data[CONF_MAC_ADDRESS]
+    device_registry = dr.async_get(hass)
+    bthome_device = await get_bthome_device_by_mac(hass, mac_address)
+
+    if bthome_device:
+        # Add our config entry to the existing device
+        device_registry.async_update_device(
+            bthome_device.id, add_config_entry_id=entry.entry_id
+        )
+        _LOGGER.debug(
+            "Linked config entry %s to existing BTHome device %s",
+            entry.entry_id,
+            mac_address,
+        )
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     # Set up listener for device updates
@@ -53,6 +69,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data[DOMAIN].pop(entry.entry_id)
+
+        # Note: We don't remove the config entry from the device here
+        # because the device is shared with BTHome integration.
+        # Home Assistant will handle cleanup automatically.
 
     return unload_ok
 
@@ -115,6 +135,33 @@ async def get_device_mac_address(hass: HomeAssistant, device_id: str) -> str | N
     for connection in device.connections:
         if connection[0] == dr.CONNECTION_BLUETOOTH:
             return connection[1]
+
+    return None
+
+
+async def get_bthome_device_by_mac(
+    hass: HomeAssistant, mac_address: str
+) -> DeviceEntry | None:
+    """Get BTHome device entry by MAC address.
+
+    This allows us to link our entities to the existing BTHome device
+    instead of creating a duplicate device entry.
+    """
+    device_registry = dr.async_get(hass)
+
+    # Find device by bluetooth connection
+    device = device_registry.async_get_device(
+        connections={(dr.CONNECTION_BLUETOOTH, mac_address)}
+    )
+
+    if not device:
+        return None
+
+    # Verify it's a BTHome device
+    for entry_id in device.config_entries:
+        entry = hass.config_entries.async_get_entry(entry_id)
+        if entry and entry.domain == BTHOME_DOMAIN:
+            return device
 
     return None
 
