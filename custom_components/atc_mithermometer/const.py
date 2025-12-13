@@ -39,6 +39,10 @@ UPDATE_CHECK_INTERVAL: Final = 3600  # Check for updates every hour
 FLASH_TIMEOUT: Final = 300  # 5 minutes timeout for flashing
 CHUNK_SIZE: Final = 244  # BLE MTU size for firmware chunks
 
+# OTA timing constants (in seconds)
+OTA_CHUNK_DELAY: Final = 0.02  # Delay between firmware chunks
+OTA_COMMAND_DELAY: Final = 0.5  # Delay after OTA commands
+
 # Device identification
 ATC_NAME_PREFIXES: Final = ["ATC_", "LYWSD03MMC"]
 PVVX_DEVICE_TYPE: Final = 0x0A1C  # Device type in advertisements
@@ -69,14 +73,22 @@ def normalize_mac(mac: str) -> str:
 
     Returns:
         MAC address in uppercase with colons (XX:XX:XX:XX:XX:XX)
+
+    Raises:
+        ValueError: If MAC address contains invalid characters or wrong length
     """
     # Remove any separators and convert to uppercase
     mac_clean = mac.replace(":", "").replace("-", "").replace(".", "").upper()
 
-    # Add colons every 2 characters if we have exactly 12 hex characters
-    if len(mac_clean) == 12:
-        return ":".join(mac_clean[i : i + 2] for i in range(0, 12, 2))
+    # Validate length and hex characters
+    if len(mac_clean) != 12:
+        raise ValueError(f"Invalid MAC address length: {mac} (expected 12 hex chars)")
 
-    # If already formatted or invalid length, just uppercase
-    # This handles the case where the MAC is already in XX:XX:XX:XX:XX:XX format
-    return mac.upper()
+    # Validate that all characters are valid hex
+    try:
+        int(mac_clean, 16)
+    except ValueError as err:
+        raise ValueError(f"Invalid MAC address: {mac} (non-hex characters)") from err
+
+    # Add colons every 2 characters
+    return ":".join(mac_clean[i : i + 2] for i in range(0, 12, 2))

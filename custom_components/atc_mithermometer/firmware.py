@@ -22,6 +22,8 @@ from .const import (
     CHUNK_SIZE,
     FIRMWARE_SOURCES,
     FLASH_TIMEOUT,
+    OTA_CHUNK_DELAY,
+    OTA_COMMAND_DELAY,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -99,7 +101,7 @@ class FirmwareManager:
         except aiohttp.ClientError as err:
             _LOGGER.error("Error fetching firmware release: %s", err)
             return None
-        except (KeyError, ValueError) as err:
+        except (KeyError, ValueError, TypeError) as err:
             _LOGGER.error("Error parsing firmware release data: %s", err)
             return None
 
@@ -180,7 +182,7 @@ class FirmwareManager:
                         progress_callback(chunk_num + 1, total_chunks)
 
                     # Small delay to avoid overwhelming the device
-                    await asyncio.sleep(0.02)
+                    await asyncio.sleep(OTA_CHUNK_DELAY)
 
                     _LOGGER.debug(
                         "Sent chunk %d/%d (%d bytes)",
@@ -212,20 +214,22 @@ class FirmwareManager:
         try:
             # Command to enter OTA mode (example, may need adjustment)
             await client.write_gatt_char(CHAR_UUID_OTA_CONTROL, b"\x01")
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(OTA_COMMAND_DELAY)
             _LOGGER.debug("OTA mode started")
-        except Exception as err:
-            _LOGGER.warning("Error starting OTA mode: %s", err)
+        except (BleakError, TimeoutError) as err:
+            # These errors are expected if device doesn't support this command
+            _LOGGER.debug("OTA mode start command not supported or failed: %s", err)
 
     async def _finalize_ota(self, client: BleakClient) -> None:
         """Finalize OTA update."""
         try:
             # Send OTA complete command
             await client.write_gatt_char(CHAR_UUID_OTA_CONTROL, b"\x02")
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(OTA_COMMAND_DELAY)
             _LOGGER.debug("OTA finalized")
-        except Exception as err:
-            _LOGGER.warning("Error finalizing OTA: %s", err)
+        except (BleakError, TimeoutError) as err:
+            # These errors are expected if device doesn't support this command
+            _LOGGER.debug("OTA finalize command not supported or failed: %s", err)
 
     async def get_current_version(self) -> str | None:
         """Get current firmware version from device.

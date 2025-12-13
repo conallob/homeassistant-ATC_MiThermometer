@@ -145,9 +145,15 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
         if bthome_device:
             # Use the existing BTHome device's identifiers to link our entity
             # Add our domain to the existing identifiers so both integrations
-            # can manage the same device
+            # can manage the same device. This intentional identifier sharing
+            # allows both BTHome and this integration to manage the same physical
+            # device, with BTHome handling sensors and this handling firmware updates.
             # Create explicit copy to avoid mutating BTHome device's identifiers
-            mac_normalized = normalize_mac(self._mac_address)
+            try:
+                mac_normalized = normalize_mac(self._mac_address)
+            except ValueError:
+                # Fallback to original if normalization fails
+                mac_normalized = self._mac_address
             identifiers: set[tuple[str, str]] = set(bthome_device.identifiers) | {
                 (DOMAIN, mac_normalized)
             }
@@ -163,7 +169,11 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
             )
         else:
             # Fallback: create standalone device if BTHome device not found
-            mac_normalized = normalize_mac(self._mac_address)
+            try:
+                mac_normalized = normalize_mac(self._mac_address)
+            except ValueError:
+                # Fallback to original if normalization fails
+                mac_normalized = self._mac_address
             self._attr_device_info = DeviceInfo(
                 identifiers={(DOMAIN, mac_normalized)},
                 name=f"ATC MiThermometer {mac_normalized[-5:]}",
@@ -171,7 +181,7 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
                 model="ATC MiThermometer",
                 connections={(dr.CONNECTION_BLUETOOTH, mac_normalized)},
             )
-            _LOGGER.warning(
+            _LOGGER.debug(
                 "BTHome device not found for %s, creating standalone device",
                 self._mac_address,
             )

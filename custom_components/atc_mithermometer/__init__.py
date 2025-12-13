@@ -55,7 +55,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "Linked config entry to existing BTHome device %s",
                 mac_address,
             )
-        except (ValueError, KeyError, AttributeError) as err:
+        except (ValueError, KeyError, AttributeError, TypeError) as err:
             _LOGGER.warning(
                 "Failed to link config entry to BTHome device %s: %s. "
                 "Entity will create standalone device.",
@@ -63,6 +63,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 err,
             )
             # Continue setup anyway - entity will create standalone device as fallback
+        except Exception as err:
+            # Catch any other unexpected exceptions to prevent setup failure
+            _LOGGER.warning(
+                "Unexpected error linking config entry to BTHome device %s: %s. "
+                "Entity will create standalone device.",
+                mac_address,
+                err,
+            )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -180,7 +188,11 @@ async def get_bthome_device_by_mac(
     device_registry = dr.async_get(hass)
 
     # Normalize MAC address to Home Assistant standard format
-    mac_normalized = normalize_mac(mac_address)
+    try:
+        mac_normalized = normalize_mac(mac_address)
+    except ValueError as err:
+        _LOGGER.error("Invalid MAC address format: %s", err)
+        return None
 
     # Find device by bluetooth connection
     device = device_registry.async_get_device(
