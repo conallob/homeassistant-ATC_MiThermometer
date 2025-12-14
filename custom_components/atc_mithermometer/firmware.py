@@ -96,7 +96,7 @@ class FirmwareManager:
                     published_at=data.get("published_at"),
                 )
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOGGER.error("Timeout fetching firmware release")
             return None
         except aiohttp.ClientError as err:
@@ -145,7 +145,7 @@ class FirmwareManager:
                 )
                 return firmware_data
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOGGER.error("Timeout downloading firmware")
             return None
         except aiohttp.ClientError as err:
@@ -225,7 +225,7 @@ class FirmwareManager:
         except BleakError as err:
             _LOGGER.error("BLE error during firmware flash: %s", err)
             return False
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOGGER.error("Timeout during firmware flash")
             return False
         except HomeAssistantError as err:
