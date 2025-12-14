@@ -1,4 +1,5 @@
 """Constants for the ATC MiThermometer Manager integration."""
+from datetime import timedelta
 from typing import Final
 
 DOMAIN: Final = "atc_mithermometer"
@@ -35,13 +36,23 @@ CHAR_UUID_OTA_CONTROL: Final = "00010203-0405-0607-0809-0a0b0c0d1912"
 CHAR_UUID_OTA_DATA: Final = "00010203-0405-0607-0809-0a0b0c0d1910"
 
 # Update settings
-UPDATE_CHECK_INTERVAL: Final = 3600  # Check for updates every hour
+UPDATE_CHECK_INTERVAL: Final = timedelta(hours=1)  # Check for updates every hour
 FLASH_TIMEOUT: Final = 300  # 5 minutes timeout for flashing
 CHUNK_SIZE: Final = 244  # BLE MTU size for firmware chunks
+
+# Firmware validation
+MIN_FIRMWARE_SIZE: Final = 1024  # Minimum valid firmware size (1KB)
+MAX_FIRMWARE_SIZE: Final = 512 * 1024  # Maximum valid firmware size (512KB)
 
 # OTA timing constants (in seconds)
 OTA_CHUNK_DELAY: Final = 0.02  # Delay between firmware chunks
 OTA_COMMAND_DELAY: Final = 0.5  # Delay after OTA commands
+
+# Progress tracking constants (percentage)
+PROGRESS_DOWNLOAD_START: Final = 10
+PROGRESS_DOWNLOAD_COMPLETE: Final = 30
+PROGRESS_FLASH_RANGE: Final = 60  # 30% to 90%
+PROGRESS_COMPLETE: Final = 100
 
 # Device identification
 ATC_NAME_PREFIXES: Final = ["ATC_", "LYWSD03MMC"]

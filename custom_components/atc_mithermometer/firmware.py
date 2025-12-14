@@ -22,6 +22,8 @@ from .const import (
     CHUNK_SIZE,
     FIRMWARE_SOURCES,
     FLASH_TIMEOUT,
+    MAX_FIRMWARE_SIZE,
+    MIN_FIRMWARE_SIZE,
     OTA_CHUNK_DELAY,
     OTA_COMMAND_DELAY,
 )
@@ -118,9 +120,28 @@ class FirmwareManager:
                     return None
 
                 firmware_data = await response.read()
+
+                # Validate firmware size
+                firmware_size = len(firmware_data)
+                if firmware_size < MIN_FIRMWARE_SIZE:
+                    _LOGGER.error(
+                        "Downloaded firmware too small: %d bytes (minimum %d)",
+                        firmware_size,
+                        MIN_FIRMWARE_SIZE,
+                    )
+                    return None
+
+                if firmware_size > MAX_FIRMWARE_SIZE:
+                    _LOGGER.error(
+                        "Downloaded firmware too large: %d bytes (maximum %d)",
+                        firmware_size,
+                        MAX_FIRMWARE_SIZE,
+                    )
+                    return None
+
                 _LOGGER.info(
                     "Downloaded firmware: %d bytes from %s",
-                    len(firmware_data),
+                    firmware_size,
                     download_url,
                 )
                 return firmware_data
@@ -255,18 +276,27 @@ class FirmwareManager:
                 # Parse version from manufacturer data if present
                 # This is device-specific and may need adjustment
                 for mfr_id, data in service_info.manufacturer_data.items():
-                    if len(data) >= 6:
-                        # Version might be encoded in manufacturer data
-                        # Format depends on firmware implementation
-                        version = f"{data[4]}.{data[5]}"
-                        _LOGGER.debug("Detected version %s from advertisements", version)
-                        return version
+                    try:
+                        if len(data) >= 6:
+                            # Version might be encoded in manufacturer data
+                            # Format depends on firmware implementation
+                            version = f"{data[4]}.{data[5]}"
+                            _LOGGER.debug(
+                                "Detected version %s from advertisements", version
+                            )
+                            return version
+                    except (IndexError, KeyError) as err:
+                        # Firmware format may have changed, continue to next
+                        _LOGGER.debug(
+                            "Could not parse version from manufacturer data: %s", err
+                        )
+                        continue
 
             # Fallback: try reading from device info service
             # This would require connecting to the device
             _LOGGER.debug("Could not determine version from advertisements")
             return None
 
-        except Exception as err:
+        except (BleakError, HomeAssistantError) as err:
             _LOGGER.debug("Error getting current version: %s", err)
             return None

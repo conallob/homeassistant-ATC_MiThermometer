@@ -31,6 +31,10 @@ from .const import (
     CONF_MAC_ADDRESS,
     DOMAIN,
     FIRMWARE_SOURCES,
+    PROGRESS_COMPLETE,
+    PROGRESS_DOWNLOAD_COMPLETE,
+    PROGRESS_DOWNLOAD_START,
+    PROGRESS_FLASH_RANGE,
     UPDATE_CHECK_INTERVAL,
     normalize_mac,
 )
@@ -248,7 +252,7 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
 
         try:
             # Download firmware
-            self._install_progress = 10
+            self._install_progress = PROGRESS_DOWNLOAD_START
             self.async_write_ha_state()
 
             firmware_data = await self._firmware_manager.download_firmware(
@@ -258,14 +262,16 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
             if not firmware_data:
                 raise HomeAssistantError("Failed to download firmware")
 
-            self._install_progress = 30
+            self._install_progress = PROGRESS_DOWNLOAD_COMPLETE
             self.async_write_ha_state()
 
             # Flash firmware
             def progress_callback(current: int, total: int) -> None:
                 """Update progress during flash."""
-                # Map progress from 30% to 90%
-                progress = 30 + int((current / total) * 60)
+                # Map progress from DOWNLOAD_COMPLETE to near COMPLETE
+                progress = PROGRESS_DOWNLOAD_COMPLETE + int(
+                    (current / total) * PROGRESS_FLASH_RANGE
+                )
                 self._install_progress = progress
                 self.async_write_ha_state()
 
@@ -276,7 +282,7 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
             if not success:
                 raise HomeAssistantError("Firmware flash failed")
 
-            self._install_progress = 100
+            self._install_progress = PROGRESS_COMPLETE
             self.async_write_ha_state()
 
             # Wait a bit for device to reboot, then refresh
