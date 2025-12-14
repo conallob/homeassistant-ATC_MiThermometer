@@ -1,5 +1,6 @@
 """Fixtures for ATC MiThermometer Manager tests."""
-from unittest.mock import MagicMock, patch
+
+from unittest.mock import MagicMock
 
 import pytest
 from homeassistant.core import HomeAssistant
@@ -16,8 +17,6 @@ def auto_enable_custom_integrations(enable_custom_integrations):
 @pytest.fixture
 async def hass(event_loop):
     """Create a Home Assistant instance for testing."""
-    from homeassistant.core import HomeAssistant
-    from homeassistant.helpers.typing import ConfigType
 
     hass = HomeAssistant("/tmp")
     hass.config.config_dir = "/tmp"

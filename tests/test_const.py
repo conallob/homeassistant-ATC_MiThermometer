@@ -1,4 +1,5 @@
 """Test the const module."""
+
 import pytest
 
 from custom_components.atc_mithermometer.const import (

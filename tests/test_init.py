@@ -1,7 +1,7 @@
 """Test the __init__ module."""
-from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
+from unittest.mock import MagicMock, patch
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
@@ -22,7 +22,6 @@ from custom_components.atc_mithermometer import (
     is_atc_mithermometer,
 )
 from custom_components.atc_mithermometer.const import (
-    ATC_NAME_PREFIXES,
     CONF_FIRMWARE_SOURCE,
     CONF_MAC_ADDRESS,
     DOMAIN,
@@ -44,17 +43,16 @@ class TestIsATCMiThermometer:
 
     def test_identifies_by_service_uuid(self):
         """Test identification by environmental service UUID."""
-        assert is_atc_mithermometer(
-            "Unknown Device",
-            [SERVICE_UUID_ENVIRONMENTAL]
-        ) is True
+        assert (
+            is_atc_mithermometer("Unknown Device", [SERVICE_UUID_ENVIRONMENTAL]) is True
+        )
 
     def test_identifies_by_service_uuid_case_insensitive(self):
         """Test service UUID matching is case insensitive."""
-        assert is_atc_mithermometer(
-            "Unknown Device",
-            [SERVICE_UUID_ENVIRONMENTAL.upper()]
-        ) is True
+        assert (
+            is_atc_mithermometer("Unknown Device", [SERVICE_UUID_ENVIRONMENTAL.upper()])
+            is True
+        )
 
     def test_does_not_identify_wrong_device(self):
         """Test does not identify non-ATC devices."""
@@ -94,16 +92,19 @@ async def test_async_setup_entry(hass: HomeAssistant):
     with patch(
         "custom_components.atc_mithermometer.get_bthome_device_by_mac",
         return_value=None,
-    ), patch.object(
-        hass.config_entries, "async_forward_entry_setups"
-    ) as mock_forward:
+    ), patch.object(hass.config_entries, "async_forward_entry_setups") as mock_forward:
         result = await async_setup_entry(hass, entry)
 
         assert result is True
         assert DOMAIN in hass.data
         assert entry.entry_id in hass.data[DOMAIN]
-        assert hass.data[DOMAIN][entry.entry_id][CONF_MAC_ADDRESS] == "AA:BB:CC:DD:EE:FF"
-        assert hass.data[DOMAIN][entry.entry_id][CONF_FIRMWARE_SOURCE] == FIRMWARE_SOURCE_PVVX
+        assert (
+            hass.data[DOMAIN][entry.entry_id][CONF_MAC_ADDRESS] == "AA:BB:CC:DD:EE:FF"
+        )
+        assert (
+            hass.data[DOMAIN][entry.entry_id][CONF_FIRMWARE_SOURCE]
+            == FIRMWARE_SOURCE_PVVX
+        )
 
         # Verify platforms were set up
         mock_forward.assert_called_once_with(entry, [Platform.UPDATE])
@@ -174,7 +175,9 @@ async def test_async_setup_entry_handles_device_link_error(hass: HomeAssistant):
     mock_device.id = "device_123"
 
     mock_device_registry = MagicMock()
-    mock_device_registry.async_update_device = MagicMock(side_effect=ValueError("Test error"))
+    mock_device_registry.async_update_device = MagicMock(
+        side_effect=ValueError("Test error")
+    )
 
     with patch(
         "custom_components.atc_mithermometer.get_bthome_device_by_mac",

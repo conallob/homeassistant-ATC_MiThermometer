@@ -1,10 +1,10 @@
 """The ATC MiThermometer Manager integration."""
+
 from __future__ import annotations
 
 import logging
 from typing import Any
 
-from homeassistant.components import bluetooth
 from homeassistant.components.bthome import DOMAIN as BTHOME_DOMAIN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -17,7 +17,6 @@ from .const import (
     CONF_FIRMWARE_SOURCE,
     CONF_MAC_ADDRESS,
     DOMAIN,
-    PVVX_DEVICE_TYPE,
     SERVICE_UUID_ENVIRONMENTAL,
     normalize_mac,
 )
@@ -103,9 +102,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 @callback
-def _handle_bthome_update(
-    hass: HomeAssistant, entry: ConfigEntry, event: Any
-) -> None:
+def _handle_bthome_update(hass: HomeAssistant, entry: ConfigEntry, event: Any) -> None:
     """Handle BTHome device updates."""
     # This allows us to react to BTHome device state changes if needed
     _LOGGER.debug("BTHome device update: %s", event.data)
@@ -147,9 +144,7 @@ async def get_atc_devices_from_bthome(hass: HomeAssistant) -> list[DeviceEntry]:
             if (
                 device.id not in seen_device_ids
                 and device.name
-                and any(
-                    device.name.startswith(prefix) for prefix in ATC_NAME_PREFIXES
-                )
+                and any(device.name.startswith(prefix) for prefix in ATC_NAME_PREFIXES)
             ):
                 seen_device_ids.add(device.id)
                 atc_devices.append(device)

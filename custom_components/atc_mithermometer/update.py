@@ -1,4 +1,5 @@
 """Update platform for ATC MiThermometer Manager integration."""
+
 from __future__ import annotations
 
 import aiohttp
@@ -27,7 +28,6 @@ from .const import (
     ATTR_CURRENT_VERSION,
     ATTR_FIRMWARE_SOURCE,
     ATTR_LATEST_VERSION,
-    ATTR_RELEASE_URL,
     CONF_FIRMWARE_SOURCE,
     CONF_MAC_ADDRESS,
     DOMAIN,

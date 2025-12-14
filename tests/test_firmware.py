@@ -1,12 +1,12 @@
 """Test the firmware module."""
+
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
 from bleak import BleakClient, BleakError
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.atc_mithermometer.const import (
     FIRMWARE_SOURCE_ATC1441,
@@ -509,9 +509,7 @@ class TestFirmwareManager:
         mock_ble_device = MagicMock()
 
         mock_service_info = MagicMock()
-        mock_service_info.manufacturer_data = {
-            0x0001: bytes([0x00, 0x01])  # Too short
-        }
+        mock_service_info.manufacturer_data = {0x0001: bytes([0x00, 0x01])}  # Too short
 
         with patch(
             "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",

@@ -1,11 +1,10 @@
 """Test the update platform."""
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
-from homeassistant.components.update import DOMAIN as UPDATE_DOMAIN
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import UpdateFailed
@@ -16,9 +15,7 @@ from custom_components.atc_mithermometer.const import (
     ATTR_LATEST_VERSION,
     CONF_FIRMWARE_SOURCE,
     CONF_MAC_ADDRESS,
-    DOMAIN,
     FIRMWARE_SOURCE_PVVX,
-    PROGRESS_COMPLETE,
     PROGRESS_DOWNLOAD_COMPLETE,
     PROGRESS_DOWNLOAD_START,
 )

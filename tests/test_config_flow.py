@@ -1,5 +1,6 @@
 """Test the config flow."""
-from unittest.mock import AsyncMock, MagicMock, patch
+
+from unittest.mock import MagicMock, patch
 
 import pytest
 from homeassistant import config_entries

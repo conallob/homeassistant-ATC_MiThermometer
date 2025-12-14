@@ -1,4 +1,5 @@
 """Firmware management for ATC MiThermometer devices."""
+
 from __future__ import annotations
 
 import asyncio
@@ -6,7 +7,6 @@ import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
 
 import aiohttp
 from bleak import BleakClient, BleakError
@@ -53,9 +53,7 @@ class FirmwareManager:
         # This is automatically cleaned up by Home Assistant
         self._session = async_get_clientsession(hass)
 
-    async def get_latest_release(
-        self, firmware_source: str
-    ) -> FirmwareRelease | None:
+    async def get_latest_release(self, firmware_source: str) -> FirmwareRelease | None:
         """Get latest firmware release from GitHub."""
         if firmware_source not in FIRMWARE_SOURCES:
             _LOGGER.error("Unknown firmware source: %s", firmware_source)
@@ -66,7 +64,9 @@ class FirmwareManager:
         asset_pattern = source_info["asset_pattern"]
 
         try:
-            async with self._session.get(api_url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+            async with self._session.get(
+                api_url, timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
                 if response.status != 200:
                     _LOGGER.error(
                         "Failed to fetch release info: HTTP %s", response.status
@@ -178,9 +178,7 @@ class FirmwareManager:
             if not ble_device:
                 raise HomeAssistantError(f"Device {self.mac_address} not found")
 
-            async with BleakClient(
-                ble_device, timeout=FLASH_TIMEOUT
-            ) as client:
+            async with BleakClient(ble_device, timeout=FLASH_TIMEOUT) as client:
                 # Verify connection
                 if not client.is_connected:
                     raise HomeAssistantError("Failed to connect to device")
