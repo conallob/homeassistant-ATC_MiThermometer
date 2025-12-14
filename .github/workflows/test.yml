@@ -4,13 +4,10 @@ on:
   push:
     branches:
       - main
-      - master
       - dev
-      - "claude/**"
   pull_request:
     branches:
       - main
-      - master
       - dev
 
 jobs:
