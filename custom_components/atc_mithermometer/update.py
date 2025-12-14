@@ -6,25 +6,39 @@ import logging
 from typing import Any
 
 import aiohttp
-from homeassistant.components.update import (UpdateDeviceClass, UpdateEntity,
-                                             UpdateEntityFeature)
+from homeassistant.components.update import (
+    UpdateDeviceClass,
+    UpdateEntity,
+    UpdateEntityFeature,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import (CoordinatorEntity,
-                                                      DataUpdateCoordinator,
-                                                      UpdateFailed)
+from homeassistant.helpers.update_coordinator import (
+    CoordinatorEntity,
+    DataUpdateCoordinator,
+    UpdateFailed,
+)
 
 from . import get_bthome_device_by_mac
-from .const import (ATTR_CURRENT_VERSION, ATTR_FIRMWARE_SOURCE,
-                    ATTR_LATEST_VERSION, CONF_FIRMWARE_SOURCE,
-                    CONF_MAC_ADDRESS, DOMAIN, FIRMWARE_SOURCES,
-                    PROGRESS_COMPLETE, PROGRESS_DOWNLOAD_COMPLETE,
-                    PROGRESS_DOWNLOAD_START, PROGRESS_FLASH_RANGE,
-                    UPDATE_CHECK_INTERVAL, normalize_mac)
+from .const import (
+    ATTR_CURRENT_VERSION,
+    ATTR_FIRMWARE_SOURCE,
+    ATTR_LATEST_VERSION,
+    CONF_FIRMWARE_SOURCE,
+    CONF_MAC_ADDRESS,
+    DOMAIN,
+    FIRMWARE_SOURCES,
+    PROGRESS_COMPLETE,
+    PROGRESS_DOWNLOAD_COMPLETE,
+    PROGRESS_DOWNLOAD_START,
+    PROGRESS_FLASH_RANGE,
+    UPDATE_CHECK_INTERVAL,
+    normalize_mac,
+)
 from .firmware import FirmwareManager, FirmwareRelease
 
 _LOGGER = logging.getLogger(__name__)

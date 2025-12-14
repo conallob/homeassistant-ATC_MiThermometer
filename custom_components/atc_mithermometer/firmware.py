@@ -15,9 +15,17 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import (CHAR_UUID_OTA_CONTROL, CHAR_UUID_OTA_DATA, CHUNK_SIZE,
-                    FIRMWARE_SOURCES, FLASH_TIMEOUT, MAX_FIRMWARE_SIZE,
-                    MIN_FIRMWARE_SIZE, OTA_CHUNK_DELAY, OTA_COMMAND_DELAY)
+from .const import (
+    CHAR_UUID_OTA_CONTROL,
+    CHAR_UUID_OTA_DATA,
+    CHUNK_SIZE,
+    FIRMWARE_SOURCES,
+    FLASH_TIMEOUT,
+    MAX_FIRMWARE_SIZE,
+    MIN_FIRMWARE_SIZE,
+    OTA_CHUNK_DELAY,
+    OTA_COMMAND_DELAY,
+)
 
 _LOGGER = logging.getLogger(__name__)
 

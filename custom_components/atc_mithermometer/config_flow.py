@@ -13,8 +13,13 @@ from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import device_registry as dr
 
 from . import get_atc_devices_from_bthome, is_atc_mithermometer
-from .const import (CONF_FIRMWARE_SOURCE, CONF_MAC_ADDRESS, DOMAIN,
-                    FIRMWARE_SOURCE_PVVX, FIRMWARE_SOURCES)
+from .const import (
+    CONF_FIRMWARE_SOURCE,
+    CONF_MAC_ADDRESS,
+    DOMAIN,
+    FIRMWARE_SOURCE_PVVX,
+    FIRMWARE_SOURCES,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
