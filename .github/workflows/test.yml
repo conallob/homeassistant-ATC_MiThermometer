@@ -14,6 +14,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     name: Run Tests
+    permissions:
+      contents: read
+      checks: write
     strategy:
       matrix:
         python-version: ["3.11", "3.12"]
