@@ -1,5 +1,9 @@
 """Fixtures for ATC MiThermometer Manager tests."""
 
+# Enable pytest-homeassistant-custom-component plugin
+# This provides the hass fixture, enable_custom_integrations, and other Home Assistant testing utilities
+pytest_plugins = ["pytest_homeassistant_custom_component"]
+
 from unittest.mock import MagicMock
 
 import pytest
@@ -7,7 +11,11 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations):
-    """Enable custom integrations in Home Assistant."""
+    """Enable custom integrations for all tests.
+
+    This fixture uses the enable_custom_integrations fixture from
+    pytest-homeassistant-custom-component to allow testing custom components.
+    """
     yield
 
 
@@ -38,12 +46,8 @@ def mock_aiohttp_session():
 
 @pytest.fixture
 def mock_bleak_client():
-    """Mock BleakClient."""
+    """Mock BleakClient for Bluetooth LE operations."""
     client = MagicMock()
     client.is_connected = True
     client.write_gatt_char = MagicMock()
     return client
-
-
-# Enable custom integrations for all tests
-pytest_plugins = ["pytest_homeassistant_custom_component"]
