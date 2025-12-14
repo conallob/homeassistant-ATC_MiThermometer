@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from homeassistant.components.bthome import DOMAIN as BTHOME_DOMAIN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
@@ -18,10 +17,14 @@ from .const import (
     CONF_MAC_ADDRESS,
     DOMAIN,
     SERVICE_UUID_ENVIRONMENTAL,
-    normalize_mac
+    normalize_mac,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# BTHome integration domain - used to link devices
+# We define this directly to avoid import dependencies on the BTHome integration
+BTHOME_DOMAIN = "bthome"
 
 PLATFORMS: list[Platform] = [Platform.UPDATE]
 
