@@ -12,8 +12,14 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceEntry
 
-from .const import (ATC_NAME_PREFIXES, CONF_FIRMWARE_SOURCE, CONF_MAC_ADDRESS,
-                    DOMAIN, SERVICE_UUID_ENVIRONMENTAL, normalize_mac)
+from .const import (
+    ATC_NAME_PREFIXES,
+    CONF_FIRMWARE_SOURCE,
+    CONF_MAC_ADDRESS,
+    DOMAIN,
+    SERVICE_UUID_ENVIRONMENTAL,
+    normalize_mac
+)
 
 _LOGGER = logging.getLogger(__name__)
 
