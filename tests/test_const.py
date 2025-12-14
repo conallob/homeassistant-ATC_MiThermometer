@@ -3,12 +3,12 @@
 import pytest
 
 from custom_components.atc_mithermometer.const import (
+    ATC_NAME_PREFIXES,
     DOMAIN,
-    FIRMWARE_SOURCE_PVVX,
     FIRMWARE_SOURCE_ATC1441,
+    FIRMWARE_SOURCE_PVVX,
     FIRMWARE_SOURCES,
     SERVICE_UUID_ENVIRONMENTAL,
-    ATC_NAME_PREFIXES,
     normalize_mac,
 )
 

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import aiohttp
 import logging
 from typing import Any
 
+import aiohttp
 from homeassistant.components.update import (
     UpdateDeviceClass,
     UpdateEntity,
@@ -14,9 +14,9 @@ from homeassistant.components.update import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
     DataUpdateCoordinator,

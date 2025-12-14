@@ -10,7 +10,6 @@ from dataclasses import dataclass
 
 import aiohttp
 from bleak import BleakClient, BleakError
-
 from homeassistant.components import bluetooth
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
