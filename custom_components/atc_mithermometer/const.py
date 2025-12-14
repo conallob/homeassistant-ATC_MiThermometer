@@ -1,4 +1,5 @@
 """Constants for the ATC MiThermometer Manager integration."""
+
 from datetime import timedelta
 from typing import Final
 

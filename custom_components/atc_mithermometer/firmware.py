@@ -1,4 +1,5 @@
 """Firmware management for ATC MiThermometer devices."""
+
 from __future__ import annotations
 
 import asyncio
@@ -6,11 +7,9 @@ import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
 
 import aiohttp
 from bleak import BleakClient, BleakError
-
 from homeassistant.components import bluetooth
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -53,9 +52,7 @@ class FirmwareManager:
         # This is automatically cleaned up by Home Assistant
         self._session = async_get_clientsession(hass)
 
-    async def get_latest_release(
-        self, firmware_source: str
-    ) -> FirmwareRelease | None:
+    async def get_latest_release(self, firmware_source: str) -> FirmwareRelease | None:
         """Get latest firmware release from GitHub."""
         if firmware_source not in FIRMWARE_SOURCES:
             _LOGGER.error("Unknown firmware source: %s", firmware_source)
@@ -66,7 +63,9 @@ class FirmwareManager:
         asset_pattern = source_info["asset_pattern"]
 
         try:
-            async with self._session.get(api_url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+            async with self._session.get(
+                api_url, timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
                 if response.status != 200:
                     _LOGGER.error(
                         "Failed to fetch release info: HTTP %s", response.status
@@ -97,7 +96,7 @@ class FirmwareManager:
                     published_at=data.get("published_at"),
                 )
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOGGER.error("Timeout fetching firmware release")
             return None
         except aiohttp.ClientError as err:
@@ -146,7 +145,7 @@ class FirmwareManager:
                 )
                 return firmware_data
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOGGER.error("Timeout downloading firmware")
             return None
         except aiohttp.ClientError as err:
@@ -178,9 +177,7 @@ class FirmwareManager:
             if not ble_device:
                 raise HomeAssistantError(f"Device {self.mac_address} not found")
 
-            async with BleakClient(
-                ble_device, timeout=FLASH_TIMEOUT
-            ) as client:
+            async with BleakClient(ble_device, timeout=FLASH_TIMEOUT) as client:
                 # Verify connection
                 if not client.is_connected:
                     raise HomeAssistantError("Failed to connect to device")
@@ -205,12 +202,19 @@ class FirmwareManager:
                     # Small delay to avoid overwhelming the device
                     await asyncio.sleep(OTA_CHUNK_DELAY)
 
-                    _LOGGER.debug(
-                        "Sent chunk %d/%d (%d bytes)",
-                        chunk_num + 1,
-                        total_chunks,
-                        len(chunk),
-                    )
+                    # Log only at 25% milestones to reduce log spam
+                    progress_percent = ((chunk_num + 1) * 100) // total_chunks
+                    if progress_percent % 25 == 0 and (
+                        chunk_num == 0
+                        or ((chunk_num * 100) // total_chunks) // 25
+                        != progress_percent // 25
+                    ):
+                        _LOGGER.debug(
+                            "Flash progress: %d%% (%d/%d chunks)",
+                            progress_percent,
+                            chunk_num + 1,
+                            total_chunks,
+                        )
 
                 # Finalize OTA
                 await self._finalize_ota(client)
@@ -221,7 +225,7 @@ class FirmwareManager:
         except BleakError as err:
             _LOGGER.error("BLE error during firmware flash: %s", err)
             return False
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOGGER.error("Timeout during firmware flash")
             return False
         except HomeAssistantError as err:
@@ -275,7 +279,7 @@ class FirmwareManager:
             if service_info and service_info.manufacturer_data:
                 # Parse version from manufacturer data if present
                 # This is device-specific and may need adjustment
-                for mfr_id, data in service_info.manufacturer_data.items():
+                for _mfr_id, data in service_info.manufacturer_data.items():
                     try:
                         if len(data) >= 6:
                             # Version might be encoded in manufacturer data

@@ -1,11 +1,10 @@
 """The ATC MiThermometer Manager integration."""
+
 from __future__ import annotations
 
 import logging
 from typing import Any
 
-from homeassistant.components import bluetooth
-from homeassistant.components.bthome import DOMAIN as BTHOME_DOMAIN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
@@ -17,12 +16,15 @@ from .const import (
     CONF_FIRMWARE_SOURCE,
     CONF_MAC_ADDRESS,
     DOMAIN,
-    PVVX_DEVICE_TYPE,
     SERVICE_UUID_ENVIRONMENTAL,
     normalize_mac,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# BTHome integration domain - used to link devices
+# We define this directly to avoid import dependencies on the BTHome integration
+BTHOME_DOMAIN = "bthome"
 
 PLATFORMS: list[Platform] = [Platform.UPDATE]
 
@@ -65,16 +67,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 err,
             )
             # Continue setup anyway - entity will create standalone device as fallback
-        except (AttributeError, TypeError) as err:
-            # AttributeError: Device object missing expected attributes
-            # TypeError: Incorrect types passed to device registry API
-            _LOGGER.error(
-                "Unexpected error linking config entry to BTHome device %s: %s. "
-                "This may indicate an integration bug.",
-                mac_address,
-                err,
-            )
-            # Continue setup anyway - entity will create standalone device as fallback
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -103,9 +95,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 @callback
-def _handle_bthome_update(
-    hass: HomeAssistant, entry: ConfigEntry, event: Any
-) -> None:
+def _handle_bthome_update(hass: HomeAssistant, entry: ConfigEntry, event: Any) -> None:
     """Handle BTHome device updates."""
     # This allows us to react to BTHome device state changes if needed
     _LOGGER.debug("BTHome device update: %s", event.data)
@@ -147,9 +137,7 @@ async def get_atc_devices_from_bthome(hass: HomeAssistant) -> list[DeviceEntry]:
             if (
                 device.id not in seen_device_ids
                 and device.name
-                and any(
-                    device.name.startswith(prefix) for prefix in ATC_NAME_PREFIXES
-                )
+                and any(device.name.startswith(prefix) for prefix in ATC_NAME_PREFIXES)
             ):
                 seen_device_ids.add(device.id)
                 atc_devices.append(device)
@@ -212,18 +200,4 @@ async def get_bthome_device_by_mac(
         if entry and entry.domain == BTHOME_DOMAIN:
             return device
 
-    return None
-
-
-async def get_current_firmware_version(
-    hass: HomeAssistant, mac_address: str
-) -> str | None:
-    """Get current firmware version from device.
-
-    This would typically be parsed from BLE advertisements or
-    read from a device characteristic.
-    """
-    # TODO: Implement version detection from BLE
-    # For now, return None - will be implemented in firmware.py
-    _LOGGER.debug("Getting firmware version for %s", mac_address)
     return None

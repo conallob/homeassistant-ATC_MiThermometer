@@ -1,15 +1,14 @@
 """Config flow for ATC MiThermometer Manager integration."""
+
 from __future__ import annotations
 
 import logging
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant import config_entries
 from homeassistant.components import bluetooth
 from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
-from homeassistant.const import CONF_ADDRESS
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import device_registry as dr
 
@@ -74,9 +73,7 @@ class ATCMiThermometerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=schema,
             errors=errors,
-            description_placeholders={
-                "device_count": str(len(discovered_devices))
-            },
+            description_placeholders={"device_count": str(len(discovered_devices))},
         )
 
     async def async_step_firmware_source(
@@ -110,9 +107,7 @@ class ATCMiThermometerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="firmware_source",
             data_schema=schema,
-            description_placeholders={
-                "device": self._selected_device or "Unknown"
-            },
+            description_placeholders={"device": self._selected_device or "Unknown"},
         )
 
     async def async_step_bluetooth(
@@ -177,13 +172,15 @@ class ATCMiThermometerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Also check BTHome integration devices
         try:
             bthome_devices = await get_atc_devices_from_bthome(self.hass)
-            device_registry = dr.async_get(self.hass)
 
             for device in bthome_devices:
                 for connection in device.connections:
                     if connection[0] == dr.CONNECTION_BLUETOOTH:
                         mac = connection[1]
-                        if mac not in current_addresses and mac not in discovered_devices:
+                        if (
+                            mac not in current_addresses
+                            and mac not in discovered_devices
+                        ):
                             # Try to get service info from bluetooth
                             service_info = bluetooth.async_last_service_info(
                                 self.hass, mac, connectable=True
