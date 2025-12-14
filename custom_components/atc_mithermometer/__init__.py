@@ -55,10 +55,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "Linked config entry to existing BTHome device %s",
                 mac_address,
             )
-        except (ValueError, KeyError, AttributeError, TypeError) as err:
+        except (ValueError, KeyError) as err:
+            # ValueError: Invalid device ID (device was deleted between check and update)
+            # KeyError: Device registry entry missing expected keys
             _LOGGER.warning(
                 "Failed to link config entry to BTHome device %s: %s. "
                 "Entity will create standalone device.",
+                mac_address,
+                err,
+            )
+            # Continue setup anyway - entity will create standalone device as fallback
+        except (AttributeError, TypeError) as err:
+            # AttributeError: Device object missing expected attributes
+            # TypeError: Incorrect types passed to device registry API
+            _LOGGER.error(
+                "Unexpected error linking config entry to BTHome device %s: %s. "
+                "This may indicate an integration bug.",
                 mac_address,
                 err,
             )

@@ -116,7 +116,11 @@ class ATCUpdateCoordinator(DataUpdateCoordinator):
                 ATTR_FIRMWARE_SOURCE: self.firmware_source,
             }
 
-        except Exception as err:
+        except UpdateFailed:
+            # Re-raise UpdateFailed as-is
+            raise
+        except (OSError, TimeoutError, aiohttp.ClientError) as err:
+            # Network and HTTP errors
             raise UpdateFailed(f"Error fetching update data: {err}") from err
 
 
@@ -273,7 +277,8 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
                     (current / total) * PROGRESS_FLASH_RANGE
                 )
                 self._install_progress = progress
-                self.async_write_ha_state()
+                # Schedule state write on event loop for thread safety
+                self.hass.loop.call_soon_threadsafe(self.async_write_ha_state)
 
             success = await self._firmware_manager.flash_firmware(
                 firmware_data, progress_callback
