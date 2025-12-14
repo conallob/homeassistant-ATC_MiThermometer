@@ -279,7 +279,7 @@ class FirmwareManager:
             if service_info and service_info.manufacturer_data:
                 # Parse version from manufacturer data if present
                 # This is device-specific and may need adjustment
-                for mfr_id, data in service_info.manufacturer_data.items():
+                for _mfr_id, data in service_info.manufacturer_data.items():
                     try:
                         if len(data) >= 6:
                             # Version might be encoded in manufacturer data
