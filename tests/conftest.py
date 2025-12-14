@@ -3,37 +3,12 @@
 from unittest.mock import MagicMock
 
 import pytest
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr
-from homeassistant.setup import async_setup_component
 
 
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations):
     """Enable custom integrations in Home Assistant."""
     yield
-
-
-@pytest.fixture
-async def hass(event_loop):
-    """Create a Home Assistant instance for testing."""
-
-    hass = HomeAssistant("/tmp")
-    hass.config.config_dir = "/tmp"
-
-    # Set up the necessary components
-    await async_setup_component(hass, "homeassistant", {})
-
-    # Initialize device and entity registries
-    hass.data.setdefault(dr.DATA_REGISTRY, dr.DeviceRegistry(hass))
-
-    # Start the hass instance
-    await hass.async_block_till_done()
-
-    yield hass
-
-    # Cleanup
-    await hass.async_stop()
 
 
 @pytest.fixture

@@ -6,12 +6,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
-
-try:
-    from pytest_homeassistant_custom_component.common import MockConfigEntry
-except ImportError:
-    # Fallback for when pytest-homeassistant-custom-component is not available
-    MockConfigEntry = None
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.atc_mithermometer import (
     async_setup_entry,
@@ -72,22 +67,14 @@ class TestIsATCMiThermometer:
 
 async def test_async_setup_entry(hass: HomeAssistant):
     """Test setting up a config entry."""
-    if MockConfigEntry:
-        entry = MockConfigEntry(
-            domain=DOMAIN,
-            data={
-                CONF_MAC_ADDRESS: "AA:BB:CC:DD:EE:FF",
-                CONF_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
-            },
-        )
-        entry.add_to_hass(hass)
-    else:
-        entry = MagicMock(spec=ConfigEntry)
-        entry.entry_id = "test_entry_id"
-        entry.data = {
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
             CONF_MAC_ADDRESS: "AA:BB:CC:DD:EE:FF",
             CONF_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
-        }
+        },
+    )
+    entry.add_to_hass(hass)
 
     with patch(
         "custom_components.atc_mithermometer.get_bthome_device_by_mac",
@@ -112,22 +99,14 @@ async def test_async_setup_entry(hass: HomeAssistant):
 
 async def test_async_setup_entry_links_to_bthome_device(hass: HomeAssistant):
     """Test setup links to existing BTHome device."""
-    if MockConfigEntry:
-        entry = MockConfigEntry(
-            domain=DOMAIN,
-            data={
-                CONF_MAC_ADDRESS: "AA:BB:CC:DD:EE:FF",
-                CONF_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
-            },
-        )
-        entry.add_to_hass(hass)
-    else:
-        entry = MagicMock(spec=ConfigEntry)
-        entry.entry_id = "test_entry_id"
-        entry.data = {
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
             CONF_MAC_ADDRESS: "AA:BB:CC:DD:EE:FF",
             CONF_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
-        }
+        },
+    )
+    entry.add_to_hass(hass)
 
     mock_device = MagicMock()
     mock_device.id = "device_123"
@@ -154,22 +133,14 @@ async def test_async_setup_entry_links_to_bthome_device(hass: HomeAssistant):
 
 async def test_async_setup_entry_handles_device_link_error(hass: HomeAssistant):
     """Test setup continues even if device linking fails."""
-    if MockConfigEntry:
-        entry = MockConfigEntry(
-            domain=DOMAIN,
-            data={
-                CONF_MAC_ADDRESS: "AA:BB:CC:DD:EE:FF",
-                CONF_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
-            },
-        )
-        entry.add_to_hass(hass)
-    else:
-        entry = MagicMock(spec=ConfigEntry)
-        entry.entry_id = "test_entry_id"
-        entry.data = {
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
             CONF_MAC_ADDRESS: "AA:BB:CC:DD:EE:FF",
             CONF_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
-        }
+        },
+    )
+    entry.add_to_hass(hass)
 
     mock_device = MagicMock()
     mock_device.id = "device_123"
@@ -195,18 +166,14 @@ async def test_async_setup_entry_handles_device_link_error(hass: HomeAssistant):
 
 async def test_async_unload_entry(hass: HomeAssistant):
     """Test unloading a config entry."""
-    if MockConfigEntry:
-        entry = MockConfigEntry(
-            domain=DOMAIN,
-            data={
-                CONF_MAC_ADDRESS: "AA:BB:CC:DD:EE:FF",
-                CONF_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
-            },
-        )
-        entry.add_to_hass(hass)
-    else:
-        entry = MagicMock(spec=ConfigEntry)
-        entry.entry_id = "test_entry_id"
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_MAC_ADDRESS: "AA:BB:CC:DD:EE:FF",
+            CONF_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
+        },
+    )
+    entry.add_to_hass(hass)
 
     # Set up some data
     hass.data[DOMAIN] = {entry.entry_id: {}}
@@ -225,18 +192,14 @@ async def test_async_unload_entry(hass: HomeAssistant):
 
 async def test_async_unload_entry_fails(hass: HomeAssistant):
     """Test unload fails properly."""
-    if MockConfigEntry:
-        entry = MockConfigEntry(
-            domain=DOMAIN,
-            data={
-                CONF_MAC_ADDRESS: "AA:BB:CC:DD:EE:FF",
-                CONF_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
-            },
-        )
-        entry.add_to_hass(hass)
-    else:
-        entry = MagicMock(spec=ConfigEntry)
-        entry.entry_id = "test_entry_id"
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_MAC_ADDRESS: "AA:BB:CC:DD:EE:FF",
+            CONF_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
+        },
+    )
+    entry.add_to_hass(hass)
 
     # Set up some data
     hass.data[DOMAIN] = {entry.entry_id: {}}
