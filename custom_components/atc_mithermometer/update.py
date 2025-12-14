@@ -1,6 +1,7 @@
 """Update platform for ATC MiThermometer Manager integration."""
 from __future__ import annotations
 
+import aiohttp
 import logging
 from typing import Any
 

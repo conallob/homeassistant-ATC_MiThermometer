@@ -92,6 +92,8 @@ class TestFirmwareManager:
         mock_response = AsyncMock()
         mock_response.status = 200
         mock_response.json = AsyncMock(return_value=mock_github_release_data)
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
 
         with patch.object(
             firmware_manager._session,
@@ -124,6 +126,8 @@ class TestFirmwareManager:
         mock_response = AsyncMock()
         mock_response.status = 200
         mock_response.json = AsyncMock(return_value=mock_data)
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
 
         with patch.object(
             firmware_manager._session,
@@ -146,6 +150,8 @@ class TestFirmwareManager:
         """Test handling HTTP error when fetching release."""
         mock_response = AsyncMock()
         mock_response.status = 404
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
 
         with patch.object(
             firmware_manager._session,
@@ -192,6 +198,8 @@ class TestFirmwareManager:
         mock_response = AsyncMock()
         mock_response.status = 200
         mock_response.json = AsyncMock(return_value=mock_github_release_data)
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
 
         with patch.object(
             firmware_manager._session,
@@ -207,6 +215,8 @@ class TestFirmwareManager:
         mock_response = AsyncMock()
         mock_response.status = 200
         mock_response.json = AsyncMock(return_value={"malformed": "data"})
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
 
         with patch.object(
             firmware_manager._session,
@@ -224,6 +234,8 @@ class TestFirmwareManager:
         mock_response = AsyncMock()
         mock_response.status = 200
         mock_response.read = AsyncMock(return_value=firmware_data)
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
 
         with patch.object(
             firmware_manager._session,
@@ -240,6 +252,8 @@ class TestFirmwareManager:
         """Test firmware download with HTTP error."""
         mock_response = AsyncMock()
         mock_response.status = 404
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
 
         with patch.object(
             firmware_manager._session,
@@ -259,6 +273,8 @@ class TestFirmwareManager:
         mock_response = AsyncMock()
         mock_response.status = 200
         mock_response.read = AsyncMock(return_value=firmware_data)
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
 
         with patch.object(
             firmware_manager._session,
@@ -278,6 +294,8 @@ class TestFirmwareManager:
         mock_response = AsyncMock()
         mock_response.status = 200
         mock_response.read = AsyncMock(return_value=firmware_data)
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
 
         with patch.object(
             firmware_manager._session,

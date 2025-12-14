@@ -57,60 +57,57 @@ def test_device_name_prefixes():
 class TestNormalizeMac:
     """Test MAC address normalization function."""
 
-    def test_normalize_mac_with_colons(self):
-        """Test normalizing MAC with colons."""
-        assert normalize_mac("aa:bb:cc:dd:ee:ff") == "AA:BB:CC:DD:EE:FF"
-        assert normalize_mac("AA:BB:CC:DD:EE:FF") == "AA:BB:CC:DD:EE:FF"
+    @pytest.mark.parametrize(
+        "input_mac,expected",
+        [
+            # Colons
+            ("aa:bb:cc:dd:ee:ff", "AA:BB:CC:DD:EE:FF"),
+            ("AA:BB:CC:DD:EE:FF", "AA:BB:CC:DD:EE:FF"),
+            # Dashes
+            ("aa-bb-cc-dd-ee-ff", "AA:BB:CC:DD:EE:FF"),
+            ("AA-BB-CC-DD-EE-FF", "AA:BB:CC:DD:EE:FF"),
+            # Dots
+            ("aa.bb.cc.dd.ee.ff", "AA:BB:CC:DD:EE:FF"),
+            ("AA.BB.CC.DD.EE.FF", "AA:BB:CC:DD:EE:FF"),
+            # No separators
+            ("aabbccddeeff", "AA:BB:CC:DD:EE:FF"),
+            ("AABBCCDDEEFF", "AA:BB:CC:DD:EE:FF"),
+            # Mixed case
+            ("Aa:Bb:Cc:Dd:Ee:Ff", "AA:BB:CC:DD:EE:FF"),
+            ("aA-bB-cC-dD-eE-fF", "AA:BB:CC:DD:EE:FF"),
+            # Real-world addresses
+            ("A4:C1:38:12:34:56", "A4:C1:38:12:34:56"),
+            ("a4c138123456", "A4:C1:38:12:34:56"),
+            ("a4-c1-38-12-34-56", "A4:C1:38:12:34:56"),
+        ],
+    )
+    def test_normalize_mac_valid_formats(self, input_mac, expected):
+        """Test normalizing various valid MAC address formats."""
+        assert normalize_mac(input_mac) == expected
 
-    def test_normalize_mac_with_dashes(self):
-        """Test normalizing MAC with dashes."""
-        assert normalize_mac("aa-bb-cc-dd-ee-ff") == "AA:BB:CC:DD:EE:FF"
-        assert normalize_mac("AA-BB-CC-DD-EE-FF") == "AA:BB:CC:DD:EE:FF"
-
-    def test_normalize_mac_with_dots(self):
-        """Test normalizing MAC with dots."""
-        assert normalize_mac("aa.bb.cc.dd.ee.ff") == "AA:BB:CC:DD:EE:FF"
-        assert normalize_mac("AA.BB.CC.DD.EE.FF") == "AA:BB:CC:DD:EE:FF"
-
-    def test_normalize_mac_no_separators(self):
-        """Test normalizing MAC without separators."""
-        assert normalize_mac("aabbccddeeff") == "AA:BB:CC:DD:EE:FF"
-        assert normalize_mac("AABBCCDDEEFF") == "AA:BB:CC:DD:EE:FF"
-
-    def test_normalize_mac_mixed_case(self):
-        """Test normalizing MAC with mixed case."""
-        assert normalize_mac("Aa:Bb:Cc:Dd:Ee:Ff") == "AA:BB:CC:DD:EE:FF"
-        assert normalize_mac("aA-bB-cC-dD-eE-fF") == "AA:BB:CC:DD:EE:FF"
-
-    def test_normalize_mac_invalid_length(self):
+    @pytest.mark.parametrize(
+        "invalid_mac",
+        [
+            "aa:bb:cc:dd:ee",  # Too short
+            "aa:bb:cc:dd:ee:ff:00",  # Too long
+            "aabbccddee",  # Too short (no separators)
+            "",  # Empty string
+        ],
+    )
+    def test_normalize_mac_invalid_length(self, invalid_mac):
         """Test normalizing MAC with invalid length."""
         with pytest.raises(ValueError, match="Invalid MAC address length"):
-            normalize_mac("aa:bb:cc:dd:ee")
+            normalize_mac(invalid_mac)
 
-        with pytest.raises(ValueError, match="Invalid MAC address length"):
-            normalize_mac("aa:bb:cc:dd:ee:ff:00")
-
-        with pytest.raises(ValueError, match="Invalid MAC address length"):
-            normalize_mac("aabbccddee")
-
-    def test_normalize_mac_invalid_characters(self):
+    @pytest.mark.parametrize(
+        "invalid_mac",
+        [
+            "gg:hh:ii:jj:kk:ll",  # Invalid hex characters
+            "aa:bb:cc:dd:ee:zz",  # Invalid character at end
+            "aa!bb@cc#dd$ee%ff",  # Special characters
+        ],
+    )
+    def test_normalize_mac_invalid_characters(self, invalid_mac):
         """Test normalizing MAC with invalid characters."""
         with pytest.raises(ValueError, match="non-hex characters"):
-            normalize_mac("gg:hh:ii:jj:kk:ll")
-
-        with pytest.raises(ValueError, match="non-hex characters"):
-            normalize_mac("aa:bb:cc:dd:ee:zz")
-
-        with pytest.raises(ValueError, match="non-hex characters"):
-            normalize_mac("aa!bb@cc#dd$ee%ff")
-
-    def test_normalize_mac_empty_string(self):
-        """Test normalizing empty MAC address."""
-        with pytest.raises(ValueError, match="Invalid MAC address length"):
-            normalize_mac("")
-
-    def test_normalize_mac_real_addresses(self):
-        """Test normalizing real-world MAC addresses."""
-        assert normalize_mac("A4:C1:38:12:34:56") == "A4:C1:38:12:34:56"
-        assert normalize_mac("a4c138123456") == "A4:C1:38:12:34:56"
-        assert normalize_mac("a4-c1-38-12-34-56") == "A4:C1:38:12:34:56"
+            normalize_mac(invalid_mac)
