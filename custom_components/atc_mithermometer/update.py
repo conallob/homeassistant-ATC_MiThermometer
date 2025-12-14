@@ -14,12 +14,14 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
     DataUpdateCoordinator,
     UpdateFailed,
 )
 
+from . import get_bthome_device_by_mac
 from .const import (
     ATTR_CURRENT_VERSION,
     ATTR_FIRMWARE_SOURCE,
@@ -29,7 +31,12 @@ from .const import (
     CONF_MAC_ADDRESS,
     DOMAIN,
     FIRMWARE_SOURCES,
+    PROGRESS_COMPLETE,
+    PROGRESS_DOWNLOAD_COMPLETE,
+    PROGRESS_DOWNLOAD_START,
+    PROGRESS_FLASH_RANGE,
     UPDATE_CHECK_INTERVAL,
+    normalize_mac,
 )
 from .firmware import FirmwareManager, FirmwareRelease
 
@@ -47,6 +54,9 @@ async def async_setup_entry(
 
     firmware_manager = FirmwareManager(hass, mac_address)
 
+    # Get the existing BTHome device to link to
+    bthome_device = await get_bthome_device_by_mac(hass, mac_address)
+
     # Create coordinator for checking updates
     coordinator = ATCUpdateCoordinator(
         hass,
@@ -59,7 +69,7 @@ async def async_setup_entry(
     await coordinator.async_config_entry_first_refresh()
 
     async_add_entities(
-        [ATCMiThermometerUpdate(coordinator, entry, firmware_manager)],
+        [ATCMiThermometerUpdate(coordinator, entry, firmware_manager, bthome_device)],
         True,
     )
 
@@ -106,7 +116,11 @@ class ATCUpdateCoordinator(DataUpdateCoordinator):
                 ATTR_FIRMWARE_SOURCE: self.firmware_source,
             }
 
-        except Exception as err:
+        except UpdateFailed:
+            # Re-raise UpdateFailed as-is
+            raise
+        except (OSError, TimeoutError, aiohttp.ClientError) as err:
+            # Network and HTTP errors
             raise UpdateFailed(f"Error fetching update data: {err}") from err
 
 
@@ -125,6 +139,7 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
         coordinator: ATCUpdateCoordinator,
         entry: ConfigEntry,
         firmware_manager: FirmwareManager,
+        bthome_device: dr.DeviceEntry | None = None,
     ) -> None:
         """Initialize the update entity."""
         super().__init__(coordinator)
@@ -134,14 +149,50 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
         self._attr_name = "Firmware Update"
         self._install_progress = 0
 
-        # Device info
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self._mac_address)},
-            name=f"ATC MiThermometer {self._mac_address[-5:]}",
-            manufacturer="Custom",
-            model="ATC MiThermometer",
-            connections={(("bluetooth", self._mac_address),)},
-        )
+        # Device info - link to existing BTHome device if available
+        if bthome_device:
+            # Use the existing BTHome device's identifiers to link our entity
+            # Add our domain to the existing identifiers so both integrations
+            # can manage the same device. This intentional identifier sharing
+            # allows both BTHome and this integration to manage the same physical
+            # device, with BTHome handling sensors and this handling firmware updates.
+            # Create explicit copy to avoid mutating BTHome device's identifiers
+            try:
+                mac_normalized = normalize_mac(self._mac_address)
+            except ValueError:
+                # Fallback to original if normalization fails
+                mac_normalized = self._mac_address
+            identifiers: set[tuple[str, str]] = set(bthome_device.identifiers) | {
+                (DOMAIN, mac_normalized)
+            }
+
+            self._attr_device_info = DeviceInfo(
+                identifiers=identifiers,
+                connections=bthome_device.connections,
+            )
+            _LOGGER.debug(
+                "Linking to existing BTHome device %s with identifiers: %s",
+                self._mac_address,
+                identifiers,
+            )
+        else:
+            # Fallback: create standalone device if BTHome device not found
+            try:
+                mac_normalized = normalize_mac(self._mac_address)
+            except ValueError:
+                # Fallback to original if normalization fails
+                mac_normalized = self._mac_address
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, mac_normalized)},
+                name=f"ATC MiThermometer {mac_normalized[-5:]}",
+                manufacturer="Custom",
+                model="ATC MiThermometer",
+                connections={(dr.CONNECTION_BLUETOOTH, mac_normalized)},
+            )
+            _LOGGER.debug(
+                "BTHome device not found for %s, creating standalone device",
+                self._mac_address,
+            )
 
     @property
     def installed_version(self) -> str | None:
@@ -205,7 +256,7 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
 
         try:
             # Download firmware
-            self._install_progress = 10
+            self._install_progress = PROGRESS_DOWNLOAD_START
             self.async_write_ha_state()
 
             firmware_data = await self._firmware_manager.download_firmware(
@@ -215,16 +266,19 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
             if not firmware_data:
                 raise HomeAssistantError("Failed to download firmware")
 
-            self._install_progress = 30
+            self._install_progress = PROGRESS_DOWNLOAD_COMPLETE
             self.async_write_ha_state()
 
             # Flash firmware
             def progress_callback(current: int, total: int) -> None:
                 """Update progress during flash."""
-                # Map progress from 30% to 90%
-                progress = 30 + int((current / total) * 60)
+                # Map progress from DOWNLOAD_COMPLETE to near COMPLETE
+                progress = PROGRESS_DOWNLOAD_COMPLETE + int(
+                    (current / total) * PROGRESS_FLASH_RANGE
+                )
                 self._install_progress = progress
-                self.async_write_ha_state()
+                # Schedule state write on event loop for thread safety
+                self.hass.loop.call_soon_threadsafe(self.async_write_ha_state)
 
             success = await self._firmware_manager.flash_firmware(
                 firmware_data, progress_callback
@@ -233,13 +287,17 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
             if not success:
                 raise HomeAssistantError("Firmware flash failed")
 
-            self._install_progress = 100
+            self._install_progress = PROGRESS_COMPLETE
             self.async_write_ha_state()
 
             # Wait a bit for device to reboot, then refresh
             await self.coordinator.async_request_refresh()
 
-        except Exception as err:
+        except HomeAssistantError:
+            # Re-raise our own errors without wrapping
+            raise
+        except (UpdateFailed, RuntimeError) as err:
+            # Coordinator refresh failures or state update errors
             _LOGGER.error("Error installing firmware: %s", err)
             raise HomeAssistantError(f"Installation failed: {err}") from err
         finally:

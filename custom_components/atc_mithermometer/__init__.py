@@ -19,6 +19,7 @@ from .const import (
     DOMAIN,
     PVVX_DEVICE_TYPE,
     SERVICE_UUID_ENVIRONMENTAL,
+    normalize_mac,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -35,6 +36,45 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         CONF_FIRMWARE_SOURCE: entry.data[CONF_FIRMWARE_SOURCE],
         CONF_MAC_ADDRESS: entry.data[CONF_MAC_ADDRESS],
     }
+
+    # Link this config entry to the existing BTHome device
+    # This must happen before platform setup so that when the update entity
+    # is created, it can properly reference the shared device and avoid
+    # creating duplicate device entries
+    mac_address = entry.data[CONF_MAC_ADDRESS]
+    device_registry = dr.async_get(hass)
+    bthome_device = await get_bthome_device_by_mac(hass, mac_address)
+
+    if bthome_device:
+        # Add our config entry to the existing device
+        try:
+            device_registry.async_update_device(
+                bthome_device.id, add_config_entry_id=entry.entry_id
+            )
+            _LOGGER.info(
+                "Linked config entry to existing BTHome device %s",
+                mac_address,
+            )
+        except (ValueError, KeyError) as err:
+            # ValueError: Invalid device ID (device was deleted between check and update)
+            # KeyError: Device registry entry missing expected keys
+            _LOGGER.warning(
+                "Failed to link config entry to BTHome device %s: %s. "
+                "Entity will create standalone device.",
+                mac_address,
+                err,
+            )
+            # Continue setup anyway - entity will create standalone device as fallback
+        except (AttributeError, TypeError) as err:
+            # AttributeError: Device object missing expected attributes
+            # TypeError: Incorrect types passed to device registry API
+            _LOGGER.error(
+                "Unexpected error linking config entry to BTHome device %s: %s. "
+                "This may indicate an integration bug.",
+                mac_address,
+                err,
+            )
+            # Continue setup anyway - entity will create standalone device as fallback
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -53,6 +93,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data[DOMAIN].pop(entry.entry_id)
+
+        # Note: We don't remove the config entry from the device here
+        # because the device is shared with BTHome integration.
+        # Home Assistant will handle cleanup automatically.
+        # FirmwareManager uses Home Assistant's shared session, so no cleanup needed.
 
     return unload_ok
 
@@ -89,19 +134,25 @@ async def get_atc_devices_from_bthome(hass: HomeAssistant) -> list[DeviceEntry]:
     """Get list of ATC MiThermometer devices from BTHome integration."""
     device_registry = dr.async_get(hass)
     atc_devices = []
+    seen_device_ids = set()
 
-    # Get all devices
-    devices = dr.async_entries_for_config_entry(
-        device_registry,
-        hass.config_entries.async_entries(BTHOME_DOMAIN)
-    )
-
-    for device in devices:
-        # Check if device matches ATC MiThermometer characteristics
-        if device.name and any(
-            device.name.startswith(prefix) for prefix in ATC_NAME_PREFIXES
-        ):
-            atc_devices.append(device)
+    # Get all devices from all BTHome config entries
+    # Use a set to track device IDs to avoid duplicates when a device
+    # is associated with multiple BTHome config entries
+    for entry in hass.config_entries.async_entries(BTHOME_DOMAIN):
+        devices = dr.async_entries_for_config_entry(device_registry, entry.entry_id)
+        for device in devices:
+            # Check if device matches ATC MiThermometer characteristics
+            # and hasn't been added yet
+            if (
+                device.id not in seen_device_ids
+                and device.name
+                and any(
+                    device.name.startswith(prefix) for prefix in ATC_NAME_PREFIXES
+                )
+            ):
+                seen_device_ids.add(device.id)
+                atc_devices.append(device)
 
     return atc_devices
 
@@ -118,6 +169,48 @@ async def get_device_mac_address(hass: HomeAssistant, device_id: str) -> str | N
     for connection in device.connections:
         if connection[0] == dr.CONNECTION_BLUETOOTH:
             return connection[1]
+
+    return None
+
+
+async def get_bthome_device_by_mac(
+    hass: HomeAssistant, mac_address: str
+) -> DeviceEntry | None:
+    """Get BTHome device entry by MAC address.
+
+    This allows us to link our entities to the existing BTHome device
+    instead of creating a duplicate device entry.
+
+    Args:
+        hass: Home Assistant instance
+        mac_address: Bluetooth MAC address in any format
+                     (will be normalized to uppercase)
+
+    Returns:
+        BTHome device entry if found, None otherwise
+    """
+    device_registry = dr.async_get(hass)
+
+    # Normalize MAC address to Home Assistant standard format
+    try:
+        mac_normalized = normalize_mac(mac_address)
+    except ValueError as err:
+        _LOGGER.error("Invalid MAC address format: %s", err)
+        return None
+
+    # Find device by bluetooth connection
+    device = device_registry.async_get_device(
+        connections={(dr.CONNECTION_BLUETOOTH, mac_normalized)}
+    )
+
+    if not device:
+        return None
+
+    # Verify it's a BTHome device by checking if any config entry belongs to BTHome
+    for entry_id in device.config_entries:
+        entry = hass.config_entries.async_get_entry(entry_id)
+        if entry and entry.domain == BTHOME_DOMAIN:
+            return device
 
     return None
 

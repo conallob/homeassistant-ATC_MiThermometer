@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,6 +14,7 @@ from bleak import BleakClient, BleakError
 from homeassistant.components import bluetooth
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     CHAR_UUID_OTA_CONTROL,
@@ -20,6 +22,10 @@ from .const import (
     CHUNK_SIZE,
     FIRMWARE_SOURCES,
     FLASH_TIMEOUT,
+    MAX_FIRMWARE_SIZE,
+    MIN_FIRMWARE_SIZE,
+    OTA_CHUNK_DELAY,
+    OTA_COMMAND_DELAY,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -43,7 +49,9 @@ class FirmwareManager:
         """Initialize firmware manager."""
         self.hass = hass
         self.mac_address = mac_address
-        self._session: aiohttp.ClientSession | None = None
+        # Use Home Assistant's shared aiohttp session instead of creating our own
+        # This is automatically cleaned up by Home Assistant
+        self._session = async_get_clientsession(hass)
 
     async def get_latest_release(
         self, firmware_source: str
@@ -58,9 +66,6 @@ class FirmwareManager:
         asset_pattern = source_info["asset_pattern"]
 
         try:
-            if self._session is None:
-                self._session = aiohttp.ClientSession()
-
             async with self._session.get(api_url, timeout=aiohttp.ClientTimeout(total=30)) as response:
                 if response.status != 200:
                     _LOGGER.error(
@@ -98,16 +103,13 @@ class FirmwareManager:
         except aiohttp.ClientError as err:
             _LOGGER.error("Error fetching firmware release: %s", err)
             return None
-        except Exception as err:
-            _LOGGER.exception("Unexpected error fetching firmware release: %s", err)
+        except (KeyError, ValueError, TypeError) as err:
+            _LOGGER.error("Error parsing firmware release data: %s", err)
             return None
 
     async def download_firmware(self, download_url: str) -> bytes | None:
         """Download firmware binary from URL."""
         try:
-            if self._session is None:
-                self._session = aiohttp.ClientSession()
-
             async with self._session.get(
                 download_url, timeout=aiohttp.ClientTimeout(total=60)
             ) as response:
@@ -118,9 +120,28 @@ class FirmwareManager:
                     return None
 
                 firmware_data = await response.read()
+
+                # Validate firmware size
+                firmware_size = len(firmware_data)
+                if firmware_size < MIN_FIRMWARE_SIZE:
+                    _LOGGER.error(
+                        "Downloaded firmware too small: %d bytes (minimum %d)",
+                        firmware_size,
+                        MIN_FIRMWARE_SIZE,
+                    )
+                    return None
+
+                if firmware_size > MAX_FIRMWARE_SIZE:
+                    _LOGGER.error(
+                        "Downloaded firmware too large: %d bytes (maximum %d)",
+                        firmware_size,
+                        MAX_FIRMWARE_SIZE,
+                    )
+                    return None
+
                 _LOGGER.info(
                     "Downloaded firmware: %d bytes from %s",
-                    len(firmware_data),
+                    firmware_size,
                     download_url,
                 )
                 return firmware_data
@@ -135,7 +156,7 @@ class FirmwareManager:
     async def flash_firmware(
         self,
         firmware_data: bytes,
-        progress_callback: callable[[int, int], None] | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> bool:
         """Flash firmware to device via BLE OTA.
 
@@ -182,7 +203,7 @@ class FirmwareManager:
                         progress_callback(chunk_num + 1, total_chunks)
 
                     # Small delay to avoid overwhelming the device
-                    await asyncio.sleep(0.02)
+                    await asyncio.sleep(OTA_CHUNK_DELAY)
 
                     _LOGGER.debug(
                         "Sent chunk %d/%d (%d bytes)",
@@ -203,8 +224,8 @@ class FirmwareManager:
         except asyncio.TimeoutError:
             _LOGGER.error("Timeout during firmware flash")
             return False
-        except Exception as err:
-            _LOGGER.exception("Unexpected error during firmware flash: %s", err)
+        except HomeAssistantError as err:
+            _LOGGER.error("Home Assistant error during firmware flash: %s", err)
             return False
 
     async def _start_ota_mode(self, client: BleakClient) -> None:
@@ -214,20 +235,22 @@ class FirmwareManager:
         try:
             # Command to enter OTA mode (example, may need adjustment)
             await client.write_gatt_char(CHAR_UUID_OTA_CONTROL, b"\x01")
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(OTA_COMMAND_DELAY)
             _LOGGER.debug("OTA mode started")
-        except Exception as err:
-            _LOGGER.warning("Error starting OTA mode: %s", err)
+        except (BleakError, TimeoutError) as err:
+            # These errors are expected if device doesn't support this command
+            _LOGGER.debug("OTA mode start command not supported or failed: %s", err)
 
     async def _finalize_ota(self, client: BleakClient) -> None:
         """Finalize OTA update."""
         try:
             # Send OTA complete command
             await client.write_gatt_char(CHAR_UUID_OTA_CONTROL, b"\x02")
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(OTA_COMMAND_DELAY)
             _LOGGER.debug("OTA finalized")
-        except Exception as err:
-            _LOGGER.warning("Error finalizing OTA: %s", err)
+        except (BleakError, TimeoutError) as err:
+            # These errors are expected if device doesn't support this command
+            _LOGGER.debug("OTA finalize command not supported or failed: %s", err)
 
     async def get_current_version(self) -> str | None:
         """Get current firmware version from device.
@@ -253,24 +276,27 @@ class FirmwareManager:
                 # Parse version from manufacturer data if present
                 # This is device-specific and may need adjustment
                 for mfr_id, data in service_info.manufacturer_data.items():
-                    if len(data) >= 6:
-                        # Version might be encoded in manufacturer data
-                        # Format depends on firmware implementation
-                        version = f"{data[4]}.{data[5]}"
-                        _LOGGER.debug("Detected version %s from advertisements", version)
-                        return version
+                    try:
+                        if len(data) >= 6:
+                            # Version might be encoded in manufacturer data
+                            # Format depends on firmware implementation
+                            version = f"{data[4]}.{data[5]}"
+                            _LOGGER.debug(
+                                "Detected version %s from advertisements", version
+                            )
+                            return version
+                    except (IndexError, KeyError) as err:
+                        # Firmware format may have changed, continue to next
+                        _LOGGER.debug(
+                            "Could not parse version from manufacturer data: %s", err
+                        )
+                        continue
 
             # Fallback: try reading from device info service
             # This would require connecting to the device
             _LOGGER.debug("Could not determine version from advertisements")
             return None
 
-        except Exception as err:
+        except (BleakError, HomeAssistantError) as err:
             _LOGGER.debug("Error getting current version: %s", err)
             return None
-
-    async def close(self) -> None:
-        """Close the firmware manager and cleanup resources."""
-        if self._session:
-            await self._session.close()
-            self._session = None
