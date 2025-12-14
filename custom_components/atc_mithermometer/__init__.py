@@ -63,14 +63,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 err,
             )
             # Continue setup anyway - entity will create standalone device as fallback
-        except Exception as err:
-            # Catch any other unexpected exceptions to prevent setup failure
-            _LOGGER.warning(
-                "Unexpected error linking config entry to BTHome device %s: %s. "
-                "Entity will create standalone device.",
-                mac_address,
-                err,
-            )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 

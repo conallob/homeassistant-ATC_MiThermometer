@@ -288,7 +288,11 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
             # Wait a bit for device to reboot, then refresh
             await self.coordinator.async_request_refresh()
 
-        except Exception as err:
+        except HomeAssistantError:
+            # Re-raise our own errors without wrapping
+            raise
+        except (UpdateFailed, RuntimeError) as err:
+            # Coordinator refresh failures or state update errors
             _LOGGER.error("Error installing firmware: %s", err)
             raise HomeAssistantError(f"Installation failed: {err}") from err
         finally:
