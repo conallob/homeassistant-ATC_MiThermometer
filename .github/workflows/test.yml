@@ -89,7 +89,7 @@ jobs:
 
       - name: Run isort
         run: |
-          isort --check-only custom_components/
+          isort --check-only --profile black custom_components/
 
   test-summary:
     runs-on: ubuntu-latest
