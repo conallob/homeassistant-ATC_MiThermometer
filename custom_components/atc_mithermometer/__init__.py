@@ -64,16 +64,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 err,
             )
             # Continue setup anyway - entity will create standalone device as fallback
-        except (AttributeError, TypeError) as err:
-            # AttributeError: Device object missing expected attributes
-            # TypeError: Incorrect types passed to device registry API
-            _LOGGER.error(
-                "Unexpected error linking config entry to BTHome device %s: %s. "
-                "This may indicate an integration bug.",
-                mac_address,
-                err,
-            )
-            # Continue setup anyway - entity will create standalone device as fallback
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -207,18 +197,4 @@ async def get_bthome_device_by_mac(
         if entry and entry.domain == BTHOME_DOMAIN:
             return device
 
-    return None
-
-
-async def get_current_firmware_version(
-    hass: HomeAssistant, mac_address: str
-) -> str | None:
-    """Get current firmware version from device.
-
-    This would typically be parsed from BLE advertisements or
-    read from a device characteristic.
-    """
-    # TODO: Implement version detection from BLE
-    # For now, return None - will be implemented in firmware.py
-    _LOGGER.debug("Getting firmware version for %s", mac_address)
     return None

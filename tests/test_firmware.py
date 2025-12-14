@@ -99,7 +99,7 @@ class TestFirmwareManager:
             firmware_manager._session,
             "get",
             return_value=mock_response,
-        ):
+        ) as mock_get:
             release = await firmware_manager.get_latest_release(FIRMWARE_SOURCE_PVVX)
 
             assert release is not None
@@ -107,6 +107,10 @@ class TestFirmwareManager:
             assert "ATC_v1.2.3.bin" in release.download_url
             assert release.release_notes == "Release notes here"
             assert release.published_at == "2024-01-01T00:00:00Z"
+
+            # Verify the API was called correctly
+            mock_get.assert_called_once()
+            mock_response.json.assert_called_once()
 
     async def test_get_latest_release_atc1441(self, firmware_manager):
         """Test getting latest release for atc1441 firmware."""
@@ -133,12 +137,16 @@ class TestFirmwareManager:
             firmware_manager._session,
             "get",
             return_value=mock_response,
-        ):
+        ) as mock_get:
             release = await firmware_manager.get_latest_release(FIRMWARE_SOURCE_ATC1441)
 
             assert release is not None
             assert release.version == "v2.0.0"
             assert "firmware.bin" in release.download_url
+
+            # Verify the API was called
+            mock_get.assert_called_once()
+            mock_response.json.assert_called_once()
 
     async def test_get_latest_release_unknown_source(self, firmware_manager):
         """Test getting release with unknown firmware source."""
@@ -157,10 +165,11 @@ class TestFirmwareManager:
             firmware_manager._session,
             "get",
             return_value=mock_response,
-        ):
+        ) as mock_get:
             release = await firmware_manager.get_latest_release(FIRMWARE_SOURCE_PVVX)
 
             assert release is None
+            mock_get.assert_called_once()
 
     async def test_get_latest_release_timeout(self, firmware_manager):
         """Test handling timeout when fetching release."""
@@ -168,10 +177,11 @@ class TestFirmwareManager:
             firmware_manager._session,
             "get",
             side_effect=asyncio.TimeoutError(),
-        ):
+        ) as mock_get:
             release = await firmware_manager.get_latest_release(FIRMWARE_SOURCE_PVVX)
 
             assert release is None
+            mock_get.assert_called_once()
 
     async def test_get_latest_release_network_error(self, firmware_manager):
         """Test handling network error when fetching release."""
@@ -179,10 +189,11 @@ class TestFirmwareManager:
             firmware_manager._session,
             "get",
             side_effect=aiohttp.ClientError(),
-        ):
+        ) as mock_get:
             release = await firmware_manager.get_latest_release(FIRMWARE_SOURCE_PVVX)
 
             assert release is None
+            mock_get.assert_called_once()
 
     async def test_get_latest_release_no_matching_asset(
         self, firmware_manager, mock_github_release_data
@@ -205,10 +216,12 @@ class TestFirmwareManager:
             firmware_manager._session,
             "get",
             return_value=mock_response,
-        ):
+        ) as mock_get:
             release = await firmware_manager.get_latest_release(FIRMWARE_SOURCE_PVVX)
 
             assert release is None
+            mock_get.assert_called_once()
+            mock_response.json.assert_called_once()
 
     async def test_get_latest_release_malformed_data(self, firmware_manager):
         """Test handling malformed release data."""
@@ -222,10 +235,12 @@ class TestFirmwareManager:
             firmware_manager._session,
             "get",
             return_value=mock_response,
-        ):
+        ) as mock_get:
             release = await firmware_manager.get_latest_release(FIRMWARE_SOURCE_PVVX)
 
             assert release is None
+            mock_get.assert_called_once()
+            mock_response.json.assert_called_once()
 
     async def test_download_firmware_success(self, firmware_manager):
         """Test successful firmware download."""
@@ -241,12 +256,14 @@ class TestFirmwareManager:
             firmware_manager._session,
             "get",
             return_value=mock_response,
-        ):
+        ) as mock_get:
             result = await firmware_manager.download_firmware(
                 "https://example.com/firmware.bin"
             )
 
             assert result == firmware_data
+            mock_get.assert_called_once_with("https://example.com/firmware.bin")
+            mock_response.read.assert_called_once()
 
     async def test_download_firmware_http_error(self, firmware_manager):
         """Test firmware download with HTTP error."""
@@ -259,12 +276,13 @@ class TestFirmwareManager:
             firmware_manager._session,
             "get",
             return_value=mock_response,
-        ):
+        ) as mock_get:
             result = await firmware_manager.download_firmware(
                 "https://example.com/firmware.bin"
             )
 
             assert result is None
+            mock_get.assert_called_once_with("https://example.com/firmware.bin")
 
     async def test_download_firmware_too_small(self, firmware_manager):
         """Test firmware download with file too small."""
@@ -280,12 +298,14 @@ class TestFirmwareManager:
             firmware_manager._session,
             "get",
             return_value=mock_response,
-        ):
+        ) as mock_get:
             result = await firmware_manager.download_firmware(
                 "https://example.com/firmware.bin"
             )
 
             assert result is None
+            mock_get.assert_called_once_with("https://example.com/firmware.bin")
+            mock_response.read.assert_called_once()
 
     async def test_download_firmware_too_large(self, firmware_manager):
         """Test firmware download with file too large."""
@@ -301,12 +321,14 @@ class TestFirmwareManager:
             firmware_manager._session,
             "get",
             return_value=mock_response,
-        ):
+        ) as mock_get:
             result = await firmware_manager.download_firmware(
                 "https://example.com/firmware.bin"
             )
 
             assert result is None
+            mock_get.assert_called_once_with("https://example.com/firmware.bin")
+            mock_response.read.assert_called_once()
 
     async def test_download_firmware_timeout(self, firmware_manager):
         """Test firmware download timeout."""
@@ -314,12 +336,13 @@ class TestFirmwareManager:
             firmware_manager._session,
             "get",
             side_effect=asyncio.TimeoutError(),
-        ):
+        ) as mock_get:
             result = await firmware_manager.download_firmware(
                 "https://example.com/firmware.bin"
             )
 
             assert result is None
+            mock_get.assert_called_once_with("https://example.com/firmware.bin")
 
     async def test_download_firmware_network_error(self, firmware_manager):
         """Test firmware download network error."""
@@ -327,12 +350,13 @@ class TestFirmwareManager:
             firmware_manager._session,
             "get",
             side_effect=aiohttp.ClientError(),
-        ):
+        ) as mock_get:
             result = await firmware_manager.download_firmware(
                 "https://example.com/firmware.bin"
             )
 
             assert result is None
+            mock_get.assert_called_once_with("https://example.com/firmware.bin")
 
     async def test_flash_firmware_success(self, firmware_manager):
         """Test successful firmware flash."""
@@ -348,13 +372,15 @@ class TestFirmwareManager:
         with patch(
             "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
             return_value=mock_ble_device,
-        ), patch(
+        ) as mock_get_device, patch(
             "custom_components.atc_mithermometer.firmware.BleakClient",
             return_value=mock_client,
-        ):
+        ) as mock_bleak:
             result = await firmware_manager.flash_firmware(firmware_data)
 
             assert result is True
+            mock_get_device.assert_called_once()
+            mock_bleak.assert_called_once()
             assert mock_client.write_gatt_char.called
 
     async def test_flash_firmware_with_progress_callback(self, firmware_manager):
@@ -396,10 +422,11 @@ class TestFirmwareManager:
         with patch(
             "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
             return_value=None,
-        ):
+        ) as mock_get_device:
             result = await firmware_manager.flash_firmware(firmware_data)
 
             assert result is False
+            mock_get_device.assert_called_once()
 
     async def test_flash_firmware_connection_failed(self, firmware_manager):
         """Test firmware flash when connection fails."""
@@ -414,13 +441,15 @@ class TestFirmwareManager:
         with patch(
             "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
             return_value=mock_ble_device,
-        ), patch(
+        ) as mock_get_device, patch(
             "custom_components.atc_mithermometer.firmware.BleakClient",
             return_value=mock_client,
-        ):
+        ) as mock_bleak:
             result = await firmware_manager.flash_firmware(firmware_data)
 
             assert result is False
+            mock_get_device.assert_called_once()
+            mock_bleak.assert_called_once()
 
     async def test_flash_firmware_ble_error(self, firmware_manager):
         """Test firmware flash with BLE error."""
@@ -431,13 +460,15 @@ class TestFirmwareManager:
         with patch(
             "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
             return_value=mock_ble_device,
-        ), patch(
+        ) as mock_get_device, patch(
             "custom_components.atc_mithermometer.firmware.BleakClient",
             side_effect=BleakError("Connection failed"),
-        ):
+        ) as mock_bleak:
             result = await firmware_manager.flash_firmware(firmware_data)
 
             assert result is False
+            mock_get_device.assert_called_once()
+            mock_bleak.assert_called_once()
 
     async def test_flash_firmware_timeout(self, firmware_manager):
         """Test firmware flash timeout."""
@@ -448,13 +479,15 @@ class TestFirmwareManager:
         with patch(
             "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
             return_value=mock_ble_device,
-        ), patch(
+        ) as mock_get_device, patch(
             "custom_components.atc_mithermometer.firmware.BleakClient",
             side_effect=asyncio.TimeoutError(),
-        ):
+        ) as mock_bleak:
             result = await firmware_manager.flash_firmware(firmware_data)
 
             assert result is False
+            mock_get_device.assert_called_once()
+            mock_bleak.assert_called_once()
 
     async def test_get_current_version_from_advertisements(self, firmware_manager):
         """Test getting current version from device advertisements."""

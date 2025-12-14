@@ -202,12 +202,19 @@ class FirmwareManager:
                     # Small delay to avoid overwhelming the device
                     await asyncio.sleep(OTA_CHUNK_DELAY)
 
-                    _LOGGER.debug(
-                        "Sent chunk %d/%d (%d bytes)",
-                        chunk_num + 1,
-                        total_chunks,
-                        len(chunk),
-                    )
+                    # Log only at 25% milestones to reduce log spam
+                    progress_percent = ((chunk_num + 1) * 100) // total_chunks
+                    if progress_percent % 25 == 0 and (
+                        chunk_num == 0
+                        or ((chunk_num * 100) // total_chunks) // 25
+                        != progress_percent // 25
+                    ):
+                        _LOGGER.debug(
+                            "Flash progress: %d%% (%d/%d chunks)",
+                            progress_percent,
+                            chunk_num + 1,
+                            total_chunks,
+                        )
 
                 # Finalize OTA
                 await self._finalize_ota(client)

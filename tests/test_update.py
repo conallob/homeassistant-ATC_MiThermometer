@@ -122,6 +122,12 @@ class TestATCUpdateCoordinator:
         assert data[ATTR_FIRMWARE_SOURCE] == FIRMWARE_SOURCE_PVVX
         assert "latest_release" in data
 
+        # Verify mocked methods were called
+        mock_firmware_manager.get_current_version.assert_called_once()
+        mock_firmware_manager.get_latest_release.assert_called_once_with(
+            FIRMWARE_SOURCE_PVVX
+        )
+
     async def test_coordinator_update_no_release(
         self, hass: HomeAssistant, mock_firmware_manager
     ):
@@ -137,6 +143,11 @@ class TestATCUpdateCoordinator:
 
         with pytest.raises(UpdateFailed, match="Failed to fetch latest release info"):
             await coordinator._async_update_data()
+
+        # Verify mocked methods were called
+        mock_firmware_manager.get_latest_release.assert_called_once_with(
+            FIRMWARE_SOURCE_PVVX
+        )
 
     async def test_coordinator_update_network_error(
         self, hass: HomeAssistant, mock_firmware_manager
@@ -155,6 +166,11 @@ class TestATCUpdateCoordinator:
 
         with pytest.raises(UpdateFailed, match="Error fetching update data"):
             await coordinator._async_update_data()
+
+        # Verify mocked method was called
+        mock_firmware_manager.get_latest_release.assert_called_once_with(
+            FIRMWARE_SOURCE_PVVX
+        )
 
 
 class TestATCMiThermometerUpdate:
@@ -476,6 +492,9 @@ class TestATCMiThermometerUpdate:
         with pytest.raises(HomeAssistantError, match="Failed to download firmware"):
             await entity.async_install(version="v1.2.3", backup=False)
 
+        # Verify download was attempted
+        mock_firmware_manager.download_firmware.assert_called_once()
+
         # Progress should be reset on failure
         assert entity._install_progress == 0
 
@@ -507,6 +526,10 @@ class TestATCMiThermometerUpdate:
 
         with pytest.raises(HomeAssistantError, match="Firmware flash failed"):
             await entity.async_install(version="v1.2.3", backup=False)
+
+        # Verify download and flash were attempted
+        mock_firmware_manager.download_firmware.assert_called_once()
+        mock_firmware_manager.flash_firmware.assert_called_once()
 
         # Progress should be reset on failure
         assert entity._install_progress == 0
