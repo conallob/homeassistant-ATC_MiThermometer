@@ -3,8 +3,10 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from bleak import BleakError
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components.atc_mithermometer.const import (
@@ -126,12 +128,30 @@ class TestATCFirmwareCoordinator:
         assert data[ATTR_CURRENT_VERSION] is None
         assert data[ATTR_FIRMWARE_SOURCE] == FIRMWARE_SOURCE_PVVX
 
-    async def test_coordinator_update_error(
+    async def test_coordinator_update_ble_error(
         self, hass: HomeAssistant, mock_firmware_manager
     ):
-        """Test coordinator update with unexpected error."""
+        """Test coordinator update with BLE error."""
         mock_firmware_manager.get_current_version = AsyncMock(
-            side_effect=RuntimeError("Unexpected error")
+            side_effect=BleakError("BLE connection failed")
+        )
+
+        coordinator = ATCFirmwareCoordinator(
+            hass,
+            mock_firmware_manager,
+            FIRMWARE_SOURCE_PVVX,
+            "AA:BB:CC:DD:EE:FF",
+        )
+
+        with pytest.raises(UpdateFailed, match="Error fetching firmware version"):
+            await coordinator._async_update_data()
+
+    async def test_coordinator_update_homeassistant_error(
+        self, hass: HomeAssistant, mock_firmware_manager
+    ):
+        """Test coordinator update with Home Assistant error."""
+        mock_firmware_manager.get_current_version = AsyncMock(
+            side_effect=HomeAssistantError("Device not found")
         )
 
         coordinator = ATCFirmwareCoordinator(
@@ -249,7 +269,8 @@ class TestATCFirmwareVersionSensor:
             coordinator, mock_config_entry
         )
 
-        assert sensor.native_value == "Unknown"
+        # Should return None when version is unavailable, letting HA show "Unavailable"
+        assert sensor.native_value is None
 
     async def test_native_value_with_empty_string(
         self, hass: HomeAssistant, mock_config_entry, mock_firmware_manager
@@ -270,7 +291,8 @@ class TestATCFirmwareVersionSensor:
             coordinator, mock_config_entry
         )
 
-        assert sensor.native_value == "Unknown"
+        # Empty string should also return None
+        assert sensor.native_value is None
 
     async def test_extra_state_attributes(
         self, hass: HomeAssistant, mock_config_entry, mock_firmware_manager
@@ -346,8 +368,8 @@ class TestATCFirmwareVersionSensor:
             coordinator, mock_config_entry
         )
 
-        # Should handle missing keys gracefully
-        assert sensor.native_value == "Unknown"
+        # Should handle missing keys gracefully by returning None
+        assert sensor.native_value is None
         attrs = sensor.extra_state_attributes
         assert ATTR_FIRMWARE_SOURCE in attrs
         assert attrs[ATTR_FIRMWARE_SOURCE] is None
