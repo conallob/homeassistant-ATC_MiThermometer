@@ -351,10 +351,24 @@ class FirmwareManager:
         try:
             if checksum_type.lower() == "sha256":
                 calculated = hashlib.sha256(firmware_data).hexdigest()
-            elif checksum_type.lower() == "md5":
-                calculated = hashlib.md5(firmware_data).hexdigest()
+            elif checksum_type.lower() == "sha512":
+                calculated = hashlib.sha512(firmware_data).hexdigest()
             elif checksum_type.lower() == "sha1":
+                # SHA1 is deprecated but still somewhat acceptable
+                _LOGGER.warning(
+                    "Using SHA1 checksum which is deprecated. "
+                    "Consider using SHA256 or SHA512 for better security."
+                )
                 calculated = hashlib.sha1(firmware_data).hexdigest()
+            elif checksum_type.lower() == "md5":
+                # MD5 is cryptographically broken - backwards compatibility only
+                _LOGGER.warning(
+                    "SECURITY WARNING: Using MD5 checksum which is "
+                    "cryptographically broken and vulnerable to collision attacks. "
+                    "This provides limited protection against malicious firmware. "
+                    "Firmware publishers should use SHA256 or SHA512."
+                )
+                calculated = hashlib.md5(firmware_data).hexdigest()
             else:
                 _LOGGER.warning("Unsupported checksum type: %s", checksum_type)
                 return True  # Don't block on unsupported checksum types
@@ -367,7 +381,9 @@ class FirmwareManager:
                 )
                 return False
 
-            _LOGGER.debug("Firmware checksum validated successfully")
+            _LOGGER.info(
+                "Firmware checksum validated successfully using %s", checksum_type
+            )
             return True
 
         except Exception as err:
@@ -425,7 +441,13 @@ class FirmwareManager:
                     if total > 0:
                         progress_callback(current, total)
                 except Exception as err:
-                    _LOGGER.debug("Error in progress callback: %s", err)
+                    # Log at warning level so callback errors are visible
+                    _LOGGER.warning(
+                        "Error in progress callback (current=%d, total=%d): %s",
+                        current,
+                        total,
+                        err,
+                    )
 
         success = await self.flash_firmware(firmware_data, safe_progress_callback)
 
