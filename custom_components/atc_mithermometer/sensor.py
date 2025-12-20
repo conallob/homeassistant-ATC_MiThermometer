@@ -5,14 +5,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from homeassistant.components.sensor import (
-    SensorDeviceClass,
-    SensorEntity,
-)
+from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
@@ -20,16 +15,14 @@ from homeassistant.helpers.update_coordinator import (
     UpdateFailed,
 )
 
-from . import get_bthome_device_by_mac
+from . import create_device_info, get_bthome_device_by_mac
 from .const import (
     ATTR_CURRENT_VERSION,
     ATTR_FIRMWARE_SOURCE,
     CONF_FIRMWARE_SOURCE,
     CONF_MAC_ADDRESS,
-    DOMAIN,
     FIRMWARE_SOURCES,
     UPDATE_CHECK_INTERVAL,
-    normalize_mac,
 )
 from .firmware import FirmwareManager
 
@@ -110,7 +103,6 @@ class ATCFirmwareCoordinator(DataUpdateCoordinator):
 class ATCFirmwareVersionSensor(CoordinatorEntity, SensorEntity):
     """Sensor entity for ATC MiThermometer firmware version."""
 
-    _attr_device_class = SensorDeviceClass.ENUM
     _attr_has_entity_name = True
     _attr_name = "Firmware Version"
 
@@ -118,49 +110,24 @@ class ATCFirmwareVersionSensor(CoordinatorEntity, SensorEntity):
         self,
         coordinator: ATCFirmwareCoordinator,
         entry: ConfigEntry,
-        bthome_device: dr.DeviceEntry | None = None,
+        bthome_device = None,
     ) -> None:
         """Initialize the sensor entity."""
         super().__init__(coordinator)
         self._mac_address = entry.data[CONF_MAC_ADDRESS]
         self._attr_unique_id = f"{self._mac_address}_firmware_version"
 
-        # Device info - link to existing BTHome device if available
-        if bthome_device:
-            # Use the existing BTHome device's identifiers to link our entity
-            try:
-                mac_normalized = normalize_mac(self._mac_address)
-            except ValueError:
-                mac_normalized = self._mac_address
-            identifiers: set[tuple[str, str]] = set(bthome_device.identifiers) | {
-                (DOMAIN, mac_normalized)
-            }
+        # Use shared device info helper
+        self._attr_device_info = create_device_info(self._mac_address, bthome_device)
 
-            self._attr_device_info = DeviceInfo(
-                identifiers=identifiers,
-                connections=bthome_device.connections,
-            )
+        if bthome_device:
             _LOGGER.debug(
-                "Linking firmware sensor to existing BTHome device %s with "
-                "identifiers: %s",
+                "Linked firmware sensor to existing BTHome device %s",
                 self._mac_address,
-                identifiers,
             )
         else:
-            # Fallback: create standalone device if BTHome device not found
-            try:
-                mac_normalized = normalize_mac(self._mac_address)
-            except ValueError:
-                mac_normalized = self._mac_address
-            self._attr_device_info = DeviceInfo(
-                identifiers={(DOMAIN, mac_normalized)},
-                name=f"ATC MiThermometer {mac_normalized[-5:]}",
-                manufacturer="Custom",
-                model="ATC MiThermometer",
-                connections={(dr.CONNECTION_BLUETOOTH, mac_normalized)},
-            )
             _LOGGER.debug(
-                "BTHome device not found for %s, creating standalone device",
+                "BTHome device not found for %s, created standalone device",
                 self._mac_address,
             )
 

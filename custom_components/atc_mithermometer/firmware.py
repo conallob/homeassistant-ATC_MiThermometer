@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import re
 from collections.abc import Callable
@@ -39,6 +40,8 @@ class FirmwareRelease:
     release_url: str
     release_notes: str | None = None
     published_at: str | None = None
+    checksum: str | None = None
+    checksum_type: str | None = None
 
 
 class FirmwareManager:
@@ -255,6 +258,186 @@ class FirmwareManager:
         except (BleakError, TimeoutError) as err:
             # These errors are expected if device doesn't support this command
             _LOGGER.debug("OTA finalize command not supported or failed: %s", err)
+
+    async def get_release_by_version(
+        self, firmware_source: str, version: str
+    ) -> FirmwareRelease | None:
+        """Get a specific firmware release by version from GitHub.
+
+        Args:
+            firmware_source: The firmware source (pvvx or atc1441)
+            version: The specific version to fetch (e.g., "v4.5")
+
+        Returns:
+            FirmwareRelease object if found, None otherwise
+        """
+        if firmware_source not in FIRMWARE_SOURCES:
+            _LOGGER.error("Unknown firmware source: %s", firmware_source)
+            return None
+
+        source_info = FIRMWARE_SOURCES[firmware_source]
+        repo = source_info["repo"]
+        asset_pattern = source_info["asset_pattern"]
+
+        # Build URL for specific release tag
+        api_url = f"https://api.github.com/repos/{repo}/releases/tags/{version}"
+
+        try:
+            async with self._session.get(
+                api_url, timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
+                if response.status == 404:
+                    _LOGGER.warning("Version %s not found for %s", version, repo)
+                    return None
+                if response.status != 200:
+                    _LOGGER.error(
+                        "Failed to fetch release %s: HTTP %s", version, response.status
+                    )
+                    return None
+
+                data = await response.json()
+
+                # Find matching binary asset
+                download_url = None
+                for asset in data.get("assets", []):
+                    if re.match(asset_pattern, asset["name"]):
+                        download_url = asset["browser_download_url"]
+                        break
+
+                if not download_url:
+                    _LOGGER.warning(
+                        "No matching firmware binary found in release %s",
+                        data.get("tag_name"),
+                    )
+                    return None
+
+                return FirmwareRelease(
+                    version=data.get("tag_name", version),
+                    download_url=download_url,
+                    release_url=data.get("html_url", ""),
+                    release_notes=data.get("body"),
+                    published_at=data.get("published_at"),
+                )
+
+        except TimeoutError:
+            _LOGGER.error("Timeout fetching firmware release %s", version)
+            return None
+        except aiohttp.ClientError as err:
+            _LOGGER.error("Error fetching firmware release %s: %s", version, err)
+            return None
+        except (KeyError, ValueError, TypeError) as err:
+            _LOGGER.error(
+                "Error parsing firmware release data for %s: %s", version, err
+            )
+            return None
+
+    def _validate_firmware_checksum(
+        self, firmware_data: bytes, checksum: str | None, checksum_type: str | None
+    ) -> bool:
+        """Validate firmware checksum.
+
+        Args:
+            firmware_data: The firmware binary data
+            checksum: Expected checksum value
+            checksum_type: Type of checksum (sha256, md5, etc.)
+
+        Returns:
+            True if checksum matches or no checksum provided, False otherwise
+        """
+        if not checksum or not checksum_type:
+            _LOGGER.debug("No checksum provided, skipping validation")
+            return True
+
+        try:
+            if checksum_type.lower() == "sha256":
+                calculated = hashlib.sha256(firmware_data).hexdigest()
+            elif checksum_type.lower() == "md5":
+                calculated = hashlib.md5(firmware_data).hexdigest()
+            elif checksum_type.lower() == "sha1":
+                calculated = hashlib.sha1(firmware_data).hexdigest()
+            else:
+                _LOGGER.warning("Unsupported checksum type: %s", checksum_type)
+                return True  # Don't block on unsupported checksum types
+
+            if calculated.lower() != checksum.lower():
+                _LOGGER.error(
+                    "Firmware checksum mismatch! Expected %s, got %s",
+                    checksum,
+                    calculated,
+                )
+                return False
+
+            _LOGGER.debug("Firmware checksum validated successfully")
+            return True
+
+        except Exception as err:
+            _LOGGER.error("Error validating checksum: %s", err)
+            return False
+
+    async def apply_firmware_update(
+        self,
+        release: FirmwareRelease,
+        progress_callback: Callable[[int, int], None] | None = None,
+    ) -> bool:
+        """Apply a firmware update to the device.
+
+        This is the unified method for applying firmware updates, used by both
+        the update entity and the apply_firmware service.
+
+        Args:
+            release: The firmware release to apply
+            progress_callback: Optional callback for progress updates (current, total)
+
+        Returns:
+            True if successful, False otherwise
+
+        Raises:
+            HomeAssistantError: If firmware download or validation fails
+        """
+        _LOGGER.info(
+            "Starting firmware update for device %s: %s",
+            self.mac_address,
+            release.version,
+        )
+
+        # Download firmware
+        firmware_data = await self.download_firmware(release.download_url)
+
+        if not firmware_data:
+            raise HomeAssistantError("Failed to download firmware")
+
+        # Validate checksum if provided
+        if not self._validate_firmware_checksum(
+            firmware_data, release.checksum, release.checksum_type
+        ):
+            raise HomeAssistantError(
+                "Firmware checksum validation failed. "
+                "Downloaded file may be corrupted or tampered with."
+            )
+
+        # Flash firmware with progress tracking
+        # Wrap the progress callback to handle errors gracefully
+        def safe_progress_callback(current: int, total: int) -> None:
+            """Safely call progress callback with error handling."""
+            if progress_callback:
+                try:
+                    # Prevent division by zero
+                    if total > 0:
+                        progress_callback(current, total)
+                except Exception as err:
+                    _LOGGER.debug("Error in progress callback: %s", err)
+
+        success = await self.flash_firmware(firmware_data, safe_progress_callback)
+
+        if not success:
+            raise HomeAssistantError("Firmware flash failed")
+
+        _LOGGER.info(
+            "Successfully applied firmware %s to device %s",
+            release.version,
+            self.mac_address,
+        )
+        return True
 
     async def get_current_version(self) -> str | None:
         """Get current firmware version from device.

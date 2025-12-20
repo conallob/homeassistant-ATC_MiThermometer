@@ -12,6 +12,7 @@ from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceEntry
+from homeassistant.helpers.entity import DeviceInfo
 
 from .const import (
     ATC_NAME_PREFIXES,
@@ -109,6 +110,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_apply_firmware(hass: HomeAssistant, call: ServiceCall) -> None:
     """Apply firmware to a device if desired version doesn't match current version.
 
+    This service allows programmatic firmware updates through automations and scripts.
+    It uses the shared firmware application logic from FirmwareManager to ensure
+    consistency with the update entity implementation.
+
     Args:
         hass: Home Assistant instance
         call: Service call data containing device_id and desired_version
@@ -173,57 +178,51 @@ async def _async_apply_firmware(hass: HomeAssistant, call: ServiceCall) -> None:
     # Get firmware source from config
     firmware_source = config_entry.data[CONF_FIRMWARE_SOURCE]
 
-    # Get the release info for the desired version
-    latest_release = await firmware_manager.get_latest_release(firmware_source)
+    # Try to get the specific version first, fall back to latest
+    release = await firmware_manager.get_release_by_version(
+        firmware_source, desired_version
+    )
 
-    if not latest_release:
+    if not release:
+        # Fall back to latest release
+        _LOGGER.warning(
+            "Version %s not found, attempting to use latest release",
+            desired_version,
+        )
+        release = await firmware_manager.get_latest_release(firmware_source)
+
+    if not release:
         raise HomeAssistantError(
-            f"Could not fetch firmware release information for source {firmware_source}"
+            f"Could not fetch firmware release for version {desired_version}"
         )
 
-    # Check if the desired version matches the latest available
-    if latest_release.version != desired_version:
+    # Warn if we're installing a different version than requested
+    if release.version != desired_version:
         _LOGGER.warning(
-            "Desired version %s does not match latest available version %s. "
-            "Will attempt to install latest version.",
+            "Desired version %s not available. Installing %s instead.",
             desired_version,
-            latest_release.version,
+            release.version,
         )
 
     _LOGGER.info(
         "Applying firmware %s to device %s (current: %s)",
-        latest_release.version,
+        release.version,
         mac_address,
         current_version or "unknown",
     )
 
-    # Download firmware
-    firmware_data = await firmware_manager.download_firmware(
-        latest_release.download_url
-    )
-
-    if not firmware_data:
-        raise HomeAssistantError("Failed to download firmware")
-
-    # Flash firmware
+    # Progress callback for logging
     def progress_callback(current: int, total: int) -> None:
         """Log progress during flash."""
-        progress_percent = (current * 100) // total
-        if progress_percent % 25 == 0:
-            _LOGGER.info(
-                "Flash progress: %d%% (%d/%d)", progress_percent, current, total
-            )
+        if total > 0:
+            progress_percent = (current * 100) // total
+            if progress_percent % 25 == 0:
+                _LOGGER.info(
+                    "Flash progress: %d%% (%d/%d)", progress_percent, current, total
+                )
 
-    success = await firmware_manager.flash_firmware(firmware_data, progress_callback)
-
-    if not success:
-        raise HomeAssistantError("Firmware flash failed")
-
-    _LOGGER.info(
-        "Successfully applied firmware %s to device %s",
-        latest_release.version,
-        mac_address,
-    )
+    # Use shared firmware application logic
+    await firmware_manager.apply_firmware_update(release, progress_callback)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -346,3 +345,47 @@ async def get_bthome_device_by_mac(
             return device
 
     return None
+
+
+def create_device_info(
+    mac_address: str, bthome_device: DeviceEntry | None = None
+) -> DeviceInfo:
+    """Create DeviceInfo for an ATC MiThermometer device.
+
+    This shared helper ensures consistent device linking across all entity platforms
+    (sensor, update, etc.) and avoids duplicate device entries.
+
+    Args:
+        mac_address: The Bluetooth MAC address of the device
+        bthome_device: Optional existing BTHome device entry to link to
+
+    Returns:
+        DeviceInfo configured to link to BTHome device or create standalone device
+    """
+    try:
+        mac_normalized = normalize_mac(mac_address)
+    except ValueError:
+        # Fallback to original if normalization fails
+        mac_normalized = mac_address
+
+    if bthome_device:
+        # Link to existing BTHome device by combining identifiers
+        # This intentional identifier sharing allows both BTHome and this
+        # integration to manage the same physical device
+        identifiers: set[tuple[str, str]] = set(bthome_device.identifiers) | {
+            (DOMAIN, mac_normalized)
+        }
+
+        return DeviceInfo(
+            identifiers=identifiers,
+            connections=bthome_device.connections,
+        )
+
+    # Fallback: create standalone device if BTHome device not found
+    return DeviceInfo(
+        identifiers={(DOMAIN, mac_normalized)},
+        name=f"ATC MiThermometer {mac_normalized[-5:]}",
+        manufacturer="Custom",
+        model="ATC MiThermometer",
+        connections={(dr.CONNECTION_BLUETOOTH, mac_normalized)},
+    )
