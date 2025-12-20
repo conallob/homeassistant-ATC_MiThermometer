@@ -54,9 +54,67 @@ class FirmwareManager:
         # Use Home Assistant's shared aiohttp session instead of creating our own
         # This is automatically cleaned up by Home Assistant
         self._session = async_get_clientsession(hass)
+        # Rate limit retry configuration
+        self._max_retries = 3
+        self._retry_delay_base = 2  # Base delay in seconds for exponential backoff
+
+    async def _fetch_github_api(self, url: str) -> dict | None:
+        """Fetch data from GitHub API with exponential backoff on rate limits.
+
+        Args:
+            url: GitHub API URL to fetch
+
+        Returns:
+            Parsed JSON response or None if all retries failed
+
+        Implements exponential backoff for 429 (rate limit) responses.
+        """
+        for attempt in range(self._max_retries + 1):
+            try:
+                async with self._session.get(
+                    url, timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    # Handle rate limiting with exponential backoff
+                    if response.status == 429:
+                        if attempt < self._max_retries:
+                            # Calculate exponential backoff delay
+                            delay = self._retry_delay_base ** (attempt + 1)
+                            _LOGGER.warning(
+                                "GitHub API rate limit hit (429). "
+                                "Retrying in %d seconds (attempt %d/%d)",
+                                delay,
+                                attempt + 1,
+                                self._max_retries,
+                            )
+                            await asyncio.sleep(delay)
+                            continue
+                        else:
+                            _LOGGER.error(
+                                "GitHub API rate limit exceeded after %d retries. "
+                                "Please wait before trying again.",
+                                self._max_retries,
+                            )
+                            return None
+
+                    if response.status != 200:
+                        _LOGGER.error(
+                            "Failed to fetch from GitHub API: HTTP %s", response.status
+                        )
+                        return None
+
+                    return await response.json()
+
+            except TimeoutError:
+                _LOGGER.error("Timeout fetching from GitHub API")
+                return None
+            except aiohttp.ClientError as err:
+                _LOGGER.error("Error fetching from GitHub API: %s", err)
+                return None
+
+        return None
 
     async def get_latest_release(self, firmware_source: str) -> FirmwareRelease | None:
-        """Get latest firmware release from GitHub."""
+        """Get latest firmware release from GitHub with rate limit handling."""
         if firmware_source not in FIRMWARE_SOURCES:
             _LOGGER.error("Unknown firmware source: %s", firmware_source)
             return None
@@ -65,61 +123,68 @@ class FirmwareManager:
         api_url = source_info["api_url"]
         asset_pattern = source_info["asset_pattern"]
 
+        # Use helper method with rate limit handling
+        data = await self._fetch_github_api(api_url)
+        if not data:
+            return None
+
         try:
-            async with self._session.get(
-                api_url, timeout=aiohttp.ClientTimeout(total=30)
-            ) as response:
-                if response.status != 200:
-                    _LOGGER.error(
-                        "Failed to fetch release info: HTTP %s", response.status
-                    )
-                    return None
+            # Find matching binary asset
+            download_url = None
+            firmware_filename = None
+            for asset in data.get("assets", []):
+                if re.match(asset_pattern, asset["name"]):
+                    download_url = asset["browser_download_url"]
+                    firmware_filename = asset["name"]
+                    break
 
-                data = await response.json()
-
-                # Find matching binary asset
-                download_url = None
-                firmware_filename = None
-                for asset in data.get("assets", []):
-                    if re.match(asset_pattern, asset["name"]):
-                        download_url = asset["browser_download_url"]
-                        firmware_filename = asset["name"]
-                        break
-
-                if not download_url:
-                    _LOGGER.warning(
-                        "No matching firmware binary found in release %s",
-                        data.get("tag_name"),
-                    )
-                    return None
-
-                # Try to find checksum from release body
-                checksum, checksum_type = self._parse_checksum_from_release(
-                    data.get("body", ""), firmware_filename
+            if not download_url:
+                _LOGGER.warning(
+                    "No matching firmware binary found in release %s",
+                    data.get("tag_name"),
                 )
+                return None
 
-                return FirmwareRelease(
-                    version=data.get("tag_name", "unknown"),
-                    download_url=download_url,
-                    release_url=data.get("html_url", ""),
-                    release_notes=data.get("body"),
-                    published_at=data.get("published_at"),
-                    checksum=checksum,
-                    checksum_type=checksum_type,
-                )
+            # Try to find checksum from release body
+            checksum, checksum_type = self._parse_checksum_from_release(
+                data.get("body", ""), firmware_filename
+            )
 
-        except TimeoutError:
-            _LOGGER.error("Timeout fetching firmware release")
-            return None
-        except aiohttp.ClientError as err:
-            _LOGGER.error("Error fetching firmware release: %s", err)
-            return None
+            return FirmwareRelease(
+                version=data.get("tag_name", "unknown"),
+                download_url=download_url,
+                release_url=data.get("html_url", ""),
+                release_notes=data.get("body"),
+                published_at=data.get("published_at"),
+                checksum=checksum,
+                checksum_type=checksum_type,
+            )
+
         except (KeyError, ValueError, TypeError) as err:
             _LOGGER.error("Error parsing firmware release data: %s", err)
             return None
 
     async def download_firmware(self, download_url: str) -> bytes | None:
-        """Download firmware binary from URL."""
+        """Download firmware binary from URL.
+
+        Args:
+            download_url: HTTPS URL to download firmware from
+
+        Returns:
+            Firmware binary data if successful, None otherwise
+
+        Security:
+            Only HTTPS URLs are allowed to prevent man-in-the-middle attacks
+        """
+        # Security: Enforce HTTPS-only downloads
+        if not download_url.startswith("https://"):
+            _LOGGER.error(
+                "SECURITY: Refusing to download firmware from non-HTTPS URL: %s. "
+                "Only HTTPS URLs are allowed to prevent man-in-the-middle attacks.",
+                download_url,
+            )
+            return None
+
         try:
             async with self._session.get(
                 download_url, timeout=aiohttp.ClientTimeout(total=60)
@@ -277,58 +342,90 @@ class FirmwareManager:
         # Build URL for specific release tag
         api_url = f"https://api.github.com/repos/{repo}/releases/tags/{version}"
 
+        # For specific version lookup, we need to handle 404 specially
+        # so we can't use the generic _fetch_github_api helper
+        for attempt in range(self._max_retries + 1):
+            try:
+                async with self._session.get(
+                    api_url, timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    if response.status == 404:
+                        _LOGGER.warning("Version %s not found for %s", version, repo)
+                        return None
+
+                    # Handle rate limiting with exponential backoff
+                    if response.status == 429:
+                        if attempt < self._max_retries:
+                            delay = self._retry_delay_base ** (attempt + 1)
+                            _LOGGER.warning(
+                                "GitHub API rate limit hit (429). "
+                                "Retrying in %d seconds (attempt %d/%d)",
+                                delay,
+                                attempt + 1,
+                                self._max_retries,
+                            )
+                            await asyncio.sleep(delay)
+                            continue
+                        else:
+                            _LOGGER.error(
+                                "GitHub API rate limit exceeded after %d retries",
+                                self._max_retries,
+                            )
+                            return None
+
+                    if response.status != 200:
+                        _LOGGER.error(
+                            "Failed to fetch release %s: HTTP %s",
+                            version,
+                            response.status,
+                        )
+                        return None
+
+                    data = await response.json()
+                    break  # Success, exit retry loop
+
+            except TimeoutError:
+                _LOGGER.error("Timeout fetching firmware release %s", version)
+                return None
+            except aiohttp.ClientError as err:
+                _LOGGER.error("Error fetching firmware release %s: %s", version, err)
+                return None
+        else:
+            # All retries exhausted
+            return None
+
         try:
-            async with self._session.get(
-                api_url, timeout=aiohttp.ClientTimeout(total=30)
-            ) as response:
-                if response.status == 404:
-                    _LOGGER.warning("Version %s not found for %s", version, repo)
-                    return None
-                if response.status != 200:
-                    _LOGGER.error(
-                        "Failed to fetch release %s: HTTP %s", version, response.status
-                    )
-                    return None
+            # Find matching binary asset
+            download_url = None
+            firmware_filename = None
+            for asset in data.get("assets", []):
+                if re.match(asset_pattern, asset["name"]):
+                    download_url = asset["browser_download_url"]
+                    firmware_filename = asset["name"]
+                    break
 
-                data = await response.json()
-
-                # Find matching binary asset
-                download_url = None
-                firmware_filename = None
-                for asset in data.get("assets", []):
-                    if re.match(asset_pattern, asset["name"]):
-                        download_url = asset["browser_download_url"]
-                        firmware_filename = asset["name"]
-                        break
-
-                if not download_url:
-                    _LOGGER.warning(
-                        "No matching firmware binary found in release %s",
-                        data.get("tag_name"),
-                    )
-                    return None
-
-                # Try to find checksum from release body
-                checksum, checksum_type = self._parse_checksum_from_release(
-                    data.get("body", ""), firmware_filename
+            if not download_url:
+                _LOGGER.warning(
+                    "No matching firmware binary found in release %s",
+                    data.get("tag_name"),
                 )
+                return None
 
-                return FirmwareRelease(
-                    version=data.get("tag_name", version),
-                    download_url=download_url,
-                    release_url=data.get("html_url", ""),
-                    release_notes=data.get("body"),
-                    published_at=data.get("published_at"),
-                    checksum=checksum,
-                    checksum_type=checksum_type,
-                )
+            # Try to find checksum from release body
+            checksum, checksum_type = self._parse_checksum_from_release(
+                data.get("body", ""), firmware_filename
+            )
 
-        except TimeoutError:
-            _LOGGER.error("Timeout fetching firmware release %s", version)
-            return None
-        except aiohttp.ClientError as err:
-            _LOGGER.error("Error fetching firmware release %s: %s", version, err)
-            return None
+            return FirmwareRelease(
+                version=data.get("tag_name", version),
+                download_url=download_url,
+                release_url=data.get("html_url", ""),
+                release_notes=data.get("body"),
+                published_at=data.get("published_at"),
+                checksum=checksum,
+                checksum_type=checksum_type,
+            )
+
         except (KeyError, ValueError, TypeError) as err:
             _LOGGER.error(
                 "Error parsing firmware release data for %s: %s", version, err
