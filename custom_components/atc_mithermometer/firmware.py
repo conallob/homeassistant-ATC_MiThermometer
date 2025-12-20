@@ -79,9 +79,11 @@ class FirmwareManager:
 
                 # Find matching binary asset
                 download_url = None
+                firmware_filename = None
                 for asset in data.get("assets", []):
                     if re.match(asset_pattern, asset["name"]):
                         download_url = asset["browser_download_url"]
+                        firmware_filename = asset["name"]
                         break
 
                 if not download_url:
@@ -91,12 +93,19 @@ class FirmwareManager:
                     )
                     return None
 
+                # Try to find checksum from release body
+                checksum, checksum_type = self._parse_checksum_from_release(
+                    data.get("body", ""), firmware_filename
+                )
+
                 return FirmwareRelease(
                     version=data.get("tag_name", "unknown"),
                     download_url=download_url,
                     release_url=data.get("html_url", ""),
                     release_notes=data.get("body"),
                     published_at=data.get("published_at"),
+                    checksum=checksum,
+                    checksum_type=checksum_type,
                 )
 
         except TimeoutError:
@@ -285,9 +294,11 @@ class FirmwareManager:
 
                 # Find matching binary asset
                 download_url = None
+                firmware_filename = None
                 for asset in data.get("assets", []):
                     if re.match(asset_pattern, asset["name"]):
                         download_url = asset["browser_download_url"]
+                        firmware_filename = asset["name"]
                         break
 
                 if not download_url:
@@ -297,12 +308,19 @@ class FirmwareManager:
                     )
                     return None
 
+                # Try to find checksum from release body
+                checksum, checksum_type = self._parse_checksum_from_release(
+                    data.get("body", ""), firmware_filename
+                )
+
                 return FirmwareRelease(
                     version=data.get("tag_name", version),
                     download_url=download_url,
                     release_url=data.get("html_url", ""),
                     release_notes=data.get("body"),
                     published_at=data.get("published_at"),
+                    checksum=checksum,
+                    checksum_type=checksum_type,
                 )
 
         except TimeoutError:
@@ -317,51 +335,106 @@ class FirmwareManager:
             )
             return None
 
+    def _parse_checksum_from_release(
+        self, release_body: str, firmware_filename: str | None
+    ) -> tuple[str | None, str | None]:
+        """Parse checksum from GitHub release body.
+
+        Looks for common checksum patterns in release notes:
+        - SHA256: <hash> <filename>
+        - SHA512: <hash> <filename>
+        - <hash> (if only one firmware file)
+
+        Args:
+            release_body: The release notes/body text
+            firmware_filename: Name of the firmware file to find checksum for
+
+        Returns:
+            Tuple of (checksum, checksum_type) or (None, None) if not found
+        """
+        if not release_body or not firmware_filename:
+            return None, None
+
+        # Common SHA256 patterns
+        # Format: <64 hex chars> <filename>
+        sha256_pattern = rf"([a-fA-F0-9]{{64}})\s+{re.escape(firmware_filename)}"
+        match = re.search(sha256_pattern, release_body)
+        if match:
+            return match.group(1).lower(), "sha256"
+
+        # Format: SHA256(<filename>)= <hash>
+        sha256_pattern2 = rf"SHA256\s*\(\s*{re.escape(firmware_filename)}\s*\)\s*=\s*([a-fA-F0-9]{{64}})"
+        match = re.search(sha256_pattern2, release_body, re.IGNORECASE)
+        if match:
+            return match.group(1).lower(), "sha256"
+
+        # Common SHA512 patterns
+        sha512_pattern = rf"([a-fA-F0-9]{{128}})\s+{re.escape(firmware_filename)}"
+        match = re.search(sha512_pattern, release_body)
+        if match:
+            return match.group(1).lower(), "sha512"
+
+        _LOGGER.debug(
+            "No checksum found in release notes for %s. "
+            "Firmware will be validated by size only.",
+            firmware_filename,
+        )
+        return None, None
+
     def _validate_firmware_checksum(
         self, firmware_data: bytes, checksum: str | None, checksum_type: str | None
     ) -> bool:
-        """Validate firmware checksum.
+        """Validate firmware checksum using strong cryptographic hashes.
+
+        Only SHA256 and SHA512 are supported for security reasons.
+        MD5 and SHA1 are rejected as they are cryptographically broken.
 
         Args:
             firmware_data: The firmware binary data
             checksum: Expected checksum value
-            checksum_type: Type of checksum (sha256, md5, etc.)
+            checksum_type: Type of checksum (must be sha256 or sha512)
 
         Returns:
             True if checksum matches or no checksum provided, False otherwise
         """
         if not checksum or not checksum_type:
-            _LOGGER.debug("No checksum provided, skipping validation")
+            _LOGGER.warning(
+                "No checksum provided for firmware validation. "
+                "Firmware integrity cannot be verified. "
+                "This is a security risk - firmware could be corrupted or tampered with."
+            )
             return True
 
+        checksum_type_lower = checksum_type.lower()
+
+        # Reject weak hash algorithms
+        if checksum_type_lower in ("md5", "sha1"):
+            _LOGGER.error(
+                "SECURITY: Rejecting firmware with %s checksum. "
+                "%s is cryptographically broken and cannot guarantee firmware integrity. "
+                "Only SHA256 and SHA512 are accepted.",
+                checksum_type_lower.upper(),
+                checksum_type_lower.upper(),
+            )
+            return False
+
+        # Calculate checksum using approved algorithms
         try:
-            if checksum_type.lower() == "sha256":
+            if checksum_type_lower == "sha256":
                 calculated = hashlib.sha256(firmware_data).hexdigest()
-            elif checksum_type.lower() == "sha512":
+            elif checksum_type_lower == "sha512":
                 calculated = hashlib.sha512(firmware_data).hexdigest()
-            elif checksum_type.lower() == "sha1":
-                # SHA1 is deprecated but still somewhat acceptable
-                _LOGGER.warning(
-                    "Using SHA1 checksum which is deprecated. "
-                    "Consider using SHA256 or SHA512 for better security."
-                )
-                calculated = hashlib.sha1(firmware_data).hexdigest()
-            elif checksum_type.lower() == "md5":
-                # MD5 is cryptographically broken - backwards compatibility only
-                _LOGGER.warning(
-                    "SECURITY WARNING: Using MD5 checksum which is "
-                    "cryptographically broken and vulnerable to collision attacks. "
-                    "This provides limited protection against malicious firmware. "
-                    "Firmware publishers should use SHA256 or SHA512."
-                )
-                calculated = hashlib.md5(firmware_data).hexdigest()
             else:
-                _LOGGER.warning("Unsupported checksum type: %s", checksum_type)
-                return True  # Don't block on unsupported checksum types
+                _LOGGER.error(
+                    "Unsupported checksum type: %s. Only SHA256 and SHA512 are supported.",
+                    checksum_type,
+                )
+                return False
 
             if calculated.lower() != checksum.lower():
                 _LOGGER.error(
-                    "Firmware checksum mismatch! Expected %s, got %s",
+                    "Firmware checksum mismatch! Expected %s, got %s. "
+                    "Firmware may be corrupted or tampered with.",
                     checksum,
                     calculated,
                 )
@@ -372,8 +445,9 @@ class FirmwareManager:
             )
             return True
 
-        except Exception as err:
-            _LOGGER.error("Error validating checksum: %s", err)
+        except (ValueError, TypeError) as err:
+            # Handle invalid checksum format or type conversion errors
+            _LOGGER.error("Error calculating checksum: %s", err)
             return False
 
     async def apply_firmware_update(

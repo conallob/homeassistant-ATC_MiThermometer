@@ -187,7 +187,8 @@ class ATCMiThermometerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             )
                             if service_info:
                                 discovered_devices[mac] = service_info
-        except Exception as err:
+        except (KeyError, IndexError, TypeError, AttributeError) as err:
+            # Handle errors from device registry, bluetooth, or malformed data
             _LOGGER.debug("Error getting BTHome devices: %s", err)
 
         return discovered_devices

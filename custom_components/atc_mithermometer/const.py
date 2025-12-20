@@ -37,7 +37,9 @@ CHAR_UUID_OTA_CONTROL: Final = "00010203-0405-0607-0809-0a0b0c0d1912"
 CHAR_UUID_OTA_DATA: Final = "00010203-0405-0607-0809-0a0b0c0d1910"
 
 # Update settings
-UPDATE_CHECK_INTERVAL: Final = timedelta(hours=1)  # Check for updates every hour
+# Check for updates every 6 hours to avoid GitHub API rate limits
+# GitHub has a rate limit of 60 requests/hour for unauthenticated requests
+UPDATE_CHECK_INTERVAL: Final = timedelta(hours=6)
 FLASH_TIMEOUT: Final = 300  # 5 minutes timeout for flashing
 CHUNK_SIZE: Final = 244  # BLE MTU size for firmware chunks
 

@@ -68,13 +68,14 @@ def _versions_equal(version1: str, version2: str) -> bool:
     except version.InvalidVersion:
         # Fall back to string comparison if parsing fails
         # This handles custom version schemes that don't follow semver
+        # Normalize both versions by removing 'v' prefix before comparing
         _LOGGER.debug(
             "Could not parse versions '%s' and '%s' semantically, "
             "using string comparison",
             version1,
             version2,
         )
-        return version1 == version2
+        return version1.lstrip("v") == version2.lstrip("v")
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
