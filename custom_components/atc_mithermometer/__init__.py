@@ -5,9 +5,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceEntry
 
@@ -19,6 +21,7 @@ from .const import (
     SERVICE_UUID_ENVIRONMENTAL,
     normalize_mac,
 )
+from .firmware import FirmwareManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -26,7 +29,10 @@ _LOGGER = logging.getLogger(__name__)
 # We define this directly to avoid import dependencies on the BTHome integration
 BTHOME_DOMAIN = "bthome"
 
-PLATFORMS: list[Platform] = [Platform.UPDATE]
+# Service names
+SERVICE_APPLY_FIRMWARE = "apply_firmware"
+
+PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.UPDATE]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -58,7 +64,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 mac_address,
             )
         except (ValueError, KeyError) as err:
-            # ValueError: Invalid device ID (device was deleted between check and update)
+            # ValueError: Invalid device ID (device was deleted between check
+            # and update)
             # KeyError: Device registry entry missing expected keys
             _LOGGER.warning(
                 "Failed to link config entry to BTHome device %s: %s. "
@@ -78,7 +85,145 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
     )
 
+    # Register service for applying firmware (only once for the domain)
+    if not hass.services.has_service(DOMAIN, SERVICE_APPLY_FIRMWARE):
+        async def async_handle_apply_firmware(call: ServiceCall) -> None:
+            """Handle the apply_firmware service call."""
+            await _async_apply_firmware(hass, call)
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_APPLY_FIRMWARE,
+            async_handle_apply_firmware,
+            schema=vol.Schema(
+                {
+                    vol.Required("device_id"): str,
+                    vol.Required("desired_version"): str,
+                }
+            ),
+        )
+
     return True
+
+
+async def _async_apply_firmware(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Apply firmware to a device if desired version doesn't match current version.
+
+    Args:
+        hass: Home Assistant instance
+        call: Service call data containing device_id and desired_version
+
+    Raises:
+        HomeAssistantError: If device not found, version mismatch check fails,
+                           or firmware application fails
+    """
+    device_id = call.data["device_id"]
+    desired_version = call.data["desired_version"]
+
+    # Get device from device registry
+    device_registry = dr.async_get(hass)
+    device = device_registry.async_get(device_id)
+
+    if not device:
+        raise HomeAssistantError(f"Device {device_id} not found")
+
+    # Get MAC address from device
+    mac_address = None
+    for connection in device.connections:
+        if connection[0] == dr.CONNECTION_BLUETOOTH:
+            mac_address = connection[1]
+            break
+
+    if not mac_address:
+        raise HomeAssistantError(
+            f"No Bluetooth MAC address found for device {device_id}"
+        )
+
+    # Find the config entry for this device
+    config_entry = None
+    for entry_id in device.config_entries:
+        entry = hass.config_entries.async_get_entry(entry_id)
+        if entry and entry.domain == DOMAIN:
+            config_entry = entry
+            break
+
+    if not config_entry:
+        raise HomeAssistantError(
+            f"No ATC MiThermometer config entry found for device {device_id}"
+        )
+
+    # Get current version
+    firmware_manager = FirmwareManager(hass, mac_address)
+    current_version = await firmware_manager.get_current_version()
+
+    if not current_version:
+        _LOGGER.warning(
+            "Could not determine current firmware version for %s, "
+            "proceeding with update",
+            mac_address,
+        )
+    elif current_version == desired_version:
+        _LOGGER.info(
+            "Device %s already has desired firmware version %s",
+            mac_address,
+            desired_version,
+        )
+        return
+
+    # Get firmware source from config
+    firmware_source = config_entry.data[CONF_FIRMWARE_SOURCE]
+
+    # Get the release info for the desired version
+    latest_release = await firmware_manager.get_latest_release(firmware_source)
+
+    if not latest_release:
+        raise HomeAssistantError(
+            f"Could not fetch firmware release information for source {firmware_source}"
+        )
+
+    # Check if the desired version matches the latest available
+    if latest_release.version != desired_version:
+        _LOGGER.warning(
+            "Desired version %s does not match latest available version %s. "
+            "Will attempt to install latest version.",
+            desired_version,
+            latest_release.version,
+        )
+
+    _LOGGER.info(
+        "Applying firmware %s to device %s (current: %s)",
+        latest_release.version,
+        mac_address,
+        current_version or "unknown",
+    )
+
+    # Download firmware
+    firmware_data = await firmware_manager.download_firmware(
+        latest_release.download_url
+    )
+
+    if not firmware_data:
+        raise HomeAssistantError("Failed to download firmware")
+
+    # Flash firmware
+    def progress_callback(current: int, total: int) -> None:
+        """Log progress during flash."""
+        progress_percent = (current * 100) // total
+        if progress_percent % 25 == 0:
+            _LOGGER.info(
+                "Flash progress: %d%% (%d/%d)", progress_percent, current, total
+            )
+
+    success = await firmware_manager.flash_firmware(firmware_data, progress_callback)
+
+    if not success:
+        raise HomeAssistantError("Firmware flash failed")
+
+    _LOGGER.info(
+        "Successfully applied firmware %s to device %s",
+        latest_release.version,
+        mac_address,
+    )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

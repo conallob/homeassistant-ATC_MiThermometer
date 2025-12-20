@@ -1,0 +1,18 @@
+apply_firmware:
+  name: Apply Firmware
+  description: Apply firmware to an ATC MiThermometer device if the desired version does not match the current version.
+  fields:
+    device_id:
+      name: Device
+      description: The ATC MiThermometer device to update.
+      required: true
+      selector:
+        device:
+          integration: atc_mithermometer
+    desired_version:
+      name: Desired Version
+      description: The desired firmware version to apply (e.g., "v4.5"). If this doesn't match the current version, the firmware will be updated.
+      required: true
+      example: "v4.5"
+      selector:
+        text:
