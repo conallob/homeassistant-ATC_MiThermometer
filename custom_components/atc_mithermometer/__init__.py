@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 import voluptuous as vol
+from packaging import version
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, callback
@@ -19,6 +20,7 @@ from .const import (
     CONF_FIRMWARE_SOURCE,
     CONF_MAC_ADDRESS,
     DOMAIN,
+    FIRMWARE_SOURCES,
     SERVICE_UUID_ENVIRONMENTAL,
     normalize_mac,
 )
@@ -34,6 +36,45 @@ BTHOME_DOMAIN = "bthome"
 SERVICE_APPLY_FIRMWARE = "apply_firmware"
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.UPDATE]
+
+
+def _versions_equal(version1: str, version2: str) -> bool:
+    """Compare two version strings for equality.
+
+    Uses packaging.version for semantic version comparison, with fallback
+    to string comparison if versions can't be parsed.
+
+    Handles common version formats:
+    - "v1.0.0" vs "1.0.0" (prefix differences)
+    - "1.0" vs "1.0.0" (different precision)
+
+    Args:
+        version1: First version string
+        version2: Second version string
+
+    Returns:
+        True if versions are semantically equal, False otherwise
+    """
+    # Try semantic version comparison first
+    try:
+        # Normalize by removing common prefixes like 'v'
+        v1_normalized = version1.lstrip("v")
+        v2_normalized = version2.lstrip("v")
+
+        v1_parsed = version.parse(v1_normalized)
+        v2_parsed = version.parse(v2_normalized)
+
+        return v1_parsed == v2_parsed
+    except version.InvalidVersion:
+        # Fall back to string comparison if parsing fails
+        # This handles custom version schemes that don't follow semver
+        _LOGGER.debug(
+            "Could not parse versions '%s' and '%s' semantically, "
+            "using string comparison",
+            version1,
+            version2,
+        )
+        return version1 == version2
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -87,6 +128,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     # Register service for applying firmware (only once for the domain)
+    # Note: While there's a theoretical race condition if multiple config entries
+    # are loaded simultaneously, Home Assistant's service registry handles this
+    # safely - async_register is idempotent and won't error on duplicate calls.
+    # The check below is an optimization to avoid unnecessary registrations.
     if not hass.services.has_service(DOMAIN, SERVICE_APPLY_FIRMWARE):
 
         async def async_handle_apply_firmware(call: ServiceCall) -> None:
@@ -168,7 +213,7 @@ async def _async_apply_firmware(hass: HomeAssistant, call: ServiceCall) -> None:
             "proceeding with update",
             mac_address,
         )
-    elif current_version == desired_version:
+    elif _versions_equal(current_version, desired_version):
         _LOGGER.info(
             "Device %s already has desired firmware version %s",
             mac_address,
@@ -178,6 +223,13 @@ async def _async_apply_firmware(hass: HomeAssistant, call: ServiceCall) -> None:
 
     # Get firmware source from config
     firmware_source = config_entry.data[CONF_FIRMWARE_SOURCE]
+
+    # Validate firmware source
+    if firmware_source not in FIRMWARE_SOURCES:
+        raise HomeAssistantError(
+            f"Invalid firmware source: {firmware_source}. "
+            f"Valid sources are: {', '.join(FIRMWARE_SOURCES.keys())}"
+        )
 
     # Get the specific version requested
     release = await firmware_manager.get_release_by_version(

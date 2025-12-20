@@ -5,9 +5,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from bleak import BleakError
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
@@ -83,9 +86,17 @@ class ATCFirmwareCoordinator(DataUpdateCoordinator):
         self.mac_address = mac_address
 
     async def _async_update_data(self) -> dict[str, Any]:
-        """Fetch current firmware version."""
+        """Fetch current firmware version.
+
+        Returns:
+            dict: Dictionary with current version and firmware source
+
+        Raises:
+            UpdateFailed: If an error occurs during version retrieval
+        """
         try:
             # Get current version from device
+            # Note: get_current_version() returns None on errors rather than raising
             current_version = await self.firmware_manager.get_current_version()
 
             return {
@@ -93,11 +104,8 @@ class ATCFirmwareCoordinator(DataUpdateCoordinator):
                 ATTR_FIRMWARE_SOURCE: self.firmware_source,
             }
 
-        except UpdateFailed:
-            # Re-raise UpdateFailed as-is
-            raise
-        except Exception as err:
-            # Other unexpected errors
+        except (BleakError, HomeAssistantError) as err:
+            # Handle BLE and Home Assistant specific errors
             raise UpdateFailed(f"Error fetching firmware version: {err}") from err
 
 
