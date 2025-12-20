@@ -54,6 +54,7 @@ def mock_firmware_manager():
     )
     manager.download_firmware = AsyncMock(return_value=b"firmware_data")
     manager.flash_firmware = AsyncMock(return_value=True)
+    manager.apply_firmware_update = AsyncMock(return_value=True)
     return manager
 
 
@@ -427,11 +428,10 @@ class TestATCMiThermometerUpdate:
 
         await entity.async_install(version="v1.2.3", backup=False)
 
-        # Verify download was called
-        mock_firmware_manager.download_firmware.assert_called_once()
-
-        # Verify flash was called
-        mock_firmware_manager.flash_firmware.assert_called_once()
+        # Verify apply_firmware_update was called with the release
+        mock_firmware_manager.apply_firmware_update.assert_called_once()
+        call_args = mock_firmware_manager.apply_firmware_update.call_args
+        assert call_args[0][0].version == "v1.2.3"
 
         # Verify coordinator refresh was requested
         coordinator.async_request_refresh.assert_called_once()
@@ -467,7 +467,9 @@ class TestATCMiThermometerUpdate:
         self, hass: HomeAssistant, mock_config_entry, mock_firmware_manager
     ):
         """Test install when download fails."""
-        mock_firmware_manager.download_firmware = AsyncMock(return_value=None)
+        mock_firmware_manager.apply_firmware_update = AsyncMock(
+            side_effect=HomeAssistantError("Failed to download firmware")
+        )
 
         coordinator = ATCUpdateCoordinator(
             hass,
@@ -492,8 +494,8 @@ class TestATCMiThermometerUpdate:
         with pytest.raises(HomeAssistantError, match="Failed to download firmware"):
             await entity.async_install(version="v1.2.3", backup=False)
 
-        # Verify download was attempted
-        mock_firmware_manager.download_firmware.assert_called_once()
+        # Verify apply_firmware_update was attempted
+        mock_firmware_manager.apply_firmware_update.assert_called_once()
 
         # Progress should be reset on failure
         assert entity._install_progress == 0
@@ -502,7 +504,9 @@ class TestATCMiThermometerUpdate:
         self, hass: HomeAssistant, mock_config_entry, mock_firmware_manager
     ):
         """Test install when flash fails."""
-        mock_firmware_manager.flash_firmware = AsyncMock(return_value=False)
+        mock_firmware_manager.apply_firmware_update = AsyncMock(
+            side_effect=HomeAssistantError("Firmware flash failed")
+        )
 
         coordinator = ATCUpdateCoordinator(
             hass,
@@ -527,9 +531,8 @@ class TestATCMiThermometerUpdate:
         with pytest.raises(HomeAssistantError, match="Firmware flash failed"):
             await entity.async_install(version="v1.2.3", backup=False)
 
-        # Verify download and flash were attempted
-        mock_firmware_manager.download_firmware.assert_called_once()
-        mock_firmware_manager.flash_firmware.assert_called_once()
+        # Verify apply_firmware_update was attempted
+        mock_firmware_manager.apply_firmware_update.assert_called_once()
 
         # Progress should be reset on failure
         assert entity._install_progress == 0
