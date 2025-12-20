@@ -231,6 +231,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data[DOMAIN].pop(entry.entry_id)
 
+        # Remove service if this is the last config entry for this integration
+        # This prevents the service from lingering after all devices are removed
+        if not hass.config_entries.async_entries(DOMAIN):
+            hass.services.async_remove(DOMAIN, SERVICE_APPLY_FIRMWARE)
+            _LOGGER.debug("Removed apply_firmware service (last config entry unloaded)")
+
         # Note: We don't remove the config entry from the device here
         # because the device is shared with BTHome integration.
         # Home Assistant will handle cleanup automatically.
