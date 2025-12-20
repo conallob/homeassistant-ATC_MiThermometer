@@ -88,6 +88,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Register service for applying firmware (only once for the domain)
     if not hass.services.has_service(DOMAIN, SERVICE_APPLY_FIRMWARE):
+
         async def async_handle_apply_firmware(call: ServiceCall) -> None:
             """Handle the apply_firmware service call."""
             await _async_apply_firmware(hass, call)

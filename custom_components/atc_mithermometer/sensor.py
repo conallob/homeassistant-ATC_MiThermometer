@@ -110,7 +110,7 @@ class ATCFirmwareVersionSensor(CoordinatorEntity, SensorEntity):
         self,
         coordinator: ATCFirmwareCoordinator,
         entry: ConfigEntry,
-        bthome_device = None,
+        bthome_device=None,
     ) -> None:
         """Initialize the sensor entity."""
         super().__init__(coordinator)

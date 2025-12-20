@@ -136,7 +136,7 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
         coordinator: ATCUpdateCoordinator,
         entry: ConfigEntry,
         firmware_manager: FirmwareManager,
-        bthome_device = None,
+        bthome_device=None,
     ) -> None:
         """Initialize the update entity."""
         super().__init__(coordinator)
@@ -240,9 +240,7 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
                     self._install_progress = progress
                     # Schedule state write on event loop for thread safety
                     try:
-                        self.hass.loop.call_soon_threadsafe(
-                            self.async_write_ha_state
-                        )
+                        self.hass.loop.call_soon_threadsafe(self.async_write_ha_state)
                     except RuntimeError as err:
                         _LOGGER.debug(
                             "Error updating state in progress callback: %s", err
