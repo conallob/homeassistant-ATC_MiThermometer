@@ -8,6 +8,8 @@ from typing import Any
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
@@ -110,7 +112,7 @@ class ATCFirmwareVersionSensor(CoordinatorEntity, SensorEntity):
         self,
         coordinator: ATCFirmwareCoordinator,
         entry: ConfigEntry,
-        bthome_device=None,
+        bthome_device: DeviceEntry | None = None,
     ) -> None:
         """Initialize the sensor entity."""
         super().__init__(coordinator)
@@ -133,9 +135,17 @@ class ATCFirmwareVersionSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self) -> str | None:
-        """Return the current firmware version."""
+        """Return the current firmware version.
+
+        Returns None if version cannot be determined, which will display
+        as 'Unknown' or 'Unavailable' in the Home Assistant UI.
+        """
         version = self.coordinator.data.get(ATTR_CURRENT_VERSION)
-        return version if version else "Unknown"
+        # Explicitly return None if version is not available (None or empty string)
+        # This allows Home Assistant to properly show the entity as unavailable
+        if not version:
+            return None
+        return version
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

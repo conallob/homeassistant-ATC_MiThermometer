@@ -205,20 +205,6 @@ class FirmwareManager:
                     # Small delay to avoid overwhelming the device
                     await asyncio.sleep(OTA_CHUNK_DELAY)
 
-                    # Log only at 25% milestones to reduce log spam
-                    progress_percent = ((chunk_num + 1) * 100) // total_chunks
-                    if progress_percent % 25 == 0 and (
-                        chunk_num == 0
-                        or ((chunk_num * 100) // total_chunks) // 25
-                        != progress_percent // 25
-                    ):
-                        _LOGGER.debug(
-                            "Flash progress: %d%% (%d/%d chunks)",
-                            progress_percent,
-                            chunk_num + 1,
-                            total_chunks,
-                        )
-
                 # Finalize OTA
                 await self._finalize_ota(client)
 
@@ -462,10 +448,27 @@ class FirmwareManager:
         return True
 
     async def get_current_version(self) -> str | None:
-        """Get current firmware version from device.
+        """Get current firmware version from device via BLE advertisements.
 
-        This attempts to read the firmware version from the device
-        via BLE characteristics or advertisements.
+        The ATC_MiThermometer firmware includes version information in the
+        manufacturer-specific data of BLE advertisements. This method attempts
+        to extract the version by parsing the manufacturer data.
+
+        Version Detection Strategy:
+        1. First attempts to get the device from the BLE address
+        2. Reads the most recent BLE advertisement (service info)
+        3. Parses manufacturer data looking for version bytes
+        4. Version format: bytes 4-5 contain major.minor version (e.g., "4.5")
+
+        Returns:
+            str: Version string (e.g., "4.5") if successfully detected
+            None: If device not available, no manufacturer data, or parsing fails
+
+        Note:
+            This method does not connect to the device - it only reads
+            advertisement data, making it fast and battery-efficient.
+            The manufacturer data format is firmware-specific and may
+            vary between ATC_MiThermometer versions.
         """
         try:
             ble_device = bluetooth.async_ble_device_from_address(

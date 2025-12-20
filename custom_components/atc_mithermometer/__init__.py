@@ -179,30 +179,15 @@ async def _async_apply_firmware(hass: HomeAssistant, call: ServiceCall) -> None:
     # Get firmware source from config
     firmware_source = config_entry.data[CONF_FIRMWARE_SOURCE]
 
-    # Try to get the specific version first, fall back to latest
+    # Get the specific version requested
     release = await firmware_manager.get_release_by_version(
         firmware_source, desired_version
     )
 
     if not release:
-        # Fall back to latest release
-        _LOGGER.warning(
-            "Version %s not found, attempting to use latest release",
-            desired_version,
-        )
-        release = await firmware_manager.get_latest_release(firmware_source)
-
-    if not release:
         raise HomeAssistantError(
-            f"Could not fetch firmware release for version {desired_version}"
-        )
-
-    # Warn if we're installing a different version than requested
-    if release.version != desired_version:
-        _LOGGER.warning(
-            "Desired version %s not available. Installing %s instead.",
-            desired_version,
-            release.version,
+            f"Firmware version {desired_version} not found for source {firmware_source}. "
+            f"Please check the version number and try again."
         )
 
     _LOGGER.info(
@@ -217,10 +202,16 @@ async def _async_apply_firmware(hass: HomeAssistant, call: ServiceCall) -> None:
         """Log progress during flash."""
         if total > 0:
             progress_percent = (current * 100) // total
-            if progress_percent % 25 == 0:
-                _LOGGER.info(
-                    "Flash progress: %d%% (%d/%d)", progress_percent, current, total
-                )
+            # Log at 25%, 50%, 75%, and 100% milestones
+            # Use a tolerance to avoid missing milestones due to rounding
+            if progress_percent >= 25 and (current - 1) * 100 // total < 25:
+                _LOGGER.info("Flash progress: 25%% (%d/%d)", current, total)
+            elif progress_percent >= 50 and (current - 1) * 100 // total < 50:
+                _LOGGER.info("Flash progress: 50%% (%d/%d)", current, total)
+            elif progress_percent >= 75 and (current - 1) * 100 // total < 75:
+                _LOGGER.info("Flash progress: 75%% (%d/%d)", current, total)
+            elif progress_percent >= 100:
+                _LOGGER.info("Flash progress: 100%% (%d/%d)", current, total)
 
     # Use shared firmware application logic
     await firmware_manager.apply_firmware_update(release, progress_callback)
