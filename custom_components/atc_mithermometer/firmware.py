@@ -24,8 +24,11 @@ from .const import (
     FLASH_TIMEOUT,
     MAX_FIRMWARE_SIZE,
     MIN_FIRMWARE_SIZE,
+    MIN_MANUFACTURER_DATA_LEN,
     OTA_CHUNK_DELAY,
     OTA_COMMAND_DELAY,
+    VERSION_BYTE_MAJOR,
+    VERSION_BYTE_MINOR,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -660,16 +663,36 @@ class FirmwareManager:
                 # This is device-specific and may need adjustment
                 for _mfr_id, data in service_info.manufacturer_data.items():
                     try:
-                        if len(data) >= 6:
-                            # Version might be encoded in manufacturer data
-                            # Format depends on firmware implementation
-                            version = f"{data[4]}.{data[5]}"
+                        # Validate data length before accessing version bytes
+                        if len(data) < MIN_MANUFACTURER_DATA_LEN:
                             _LOGGER.debug(
-                                "Detected version %s from advertisements", version
+                                "Manufacturer data too short (%d bytes, need %d) for version detection",
+                                len(data),
+                                MIN_MANUFACTURER_DATA_LEN,
                             )
-                            return version
-                    except (IndexError, KeyError) as err:
-                        # Firmware format may have changed, continue to next
+                            continue
+
+                        # Extract version from predefined byte positions
+                        # ATC_MiThermometer firmware stores version at bytes 4-5
+                        major = data[VERSION_BYTE_MAJOR]
+                        minor = data[VERSION_BYTE_MINOR]
+
+                        # Validate version numbers are reasonable (0-99 each)
+                        if not (0 <= major <= 99 and 0 <= minor <= 99):
+                            _LOGGER.debug(
+                                "Version bytes out of range: %d.%d (expected 0-99)",
+                                major,
+                                minor,
+                            )
+                            continue
+
+                        version_str = f"{major}.{minor}"
+                        _LOGGER.debug(
+                            "Detected version %s from advertisements", version_str
+                        )
+                        return version_str
+                    except (IndexError, KeyError, ValueError, TypeError) as err:
+                        # Firmware format may have changed or data is malformed
                         _LOGGER.debug(
                             "Could not parse version from manufacturer data: %s", err
                         )

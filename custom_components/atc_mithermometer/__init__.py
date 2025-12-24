@@ -250,21 +250,20 @@ async def _async_apply_firmware(hass: HomeAssistant, call: ServiceCall) -> None:
         current_version or "unknown",
     )
 
-    # Progress callback for logging
+    # Progress callback for logging with milestone tracking
+    last_milestone = {"value": 0}  # Use dict to allow mutation in nested function
+
     def progress_callback(current: int, total: int) -> None:
-        """Log progress during flash."""
-        if total > 0:
+        """Log progress during flash at 25% milestones."""
+        if total > 0 and current > 0:
             progress_percent = (current * 100) // total
-            # Log at 25%, 50%, 75%, and 100% milestones
-            # Use a tolerance to avoid missing milestones due to rounding
-            if progress_percent >= 25 and (current - 1) * 100 // total < 25:
-                _LOGGER.info("Flash progress: 25%% (%d/%d)", current, total)
-            elif progress_percent >= 50 and (current - 1) * 100 // total < 50:
-                _LOGGER.info("Flash progress: 50%% (%d/%d)", current, total)
-            elif progress_percent >= 75 and (current - 1) * 100 // total < 75:
-                _LOGGER.info("Flash progress: 75%% (%d/%d)", current, total)
-            elif progress_percent >= 100:
-                _LOGGER.info("Flash progress: 100%% (%d/%d)", current, total)
+            # Determine current milestone (0, 25, 50, 75, 100)
+            current_milestone = (progress_percent // 25) * 25
+
+            # Log when we cross a new milestone
+            if current_milestone > last_milestone["value"] and current_milestone <= 100:
+                last_milestone["value"] = current_milestone
+                _LOGGER.info("Flash progress: %d%% (%d/%d)", current_milestone, current, total)
 
     # Use shared firmware application logic
     await firmware_manager.apply_firmware_update(release, progress_callback)
@@ -287,8 +286,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGER.debug(
                     "Removed apply_firmware service (last config entry unloaded)"
                 )
-            except Exception as err:
+            except (ValueError, KeyError, RuntimeError) as err:
                 # Service might have been removed by another concurrent unload
+                # or the service registry may have internal errors
                 # This is not a fatal error, just log it
                 _LOGGER.debug(
                     "Failed to remove apply_firmware service "

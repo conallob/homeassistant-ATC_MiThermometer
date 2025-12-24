@@ -62,6 +62,12 @@ ATC_NAME_PREFIXES: Final = ["ATC_", "LYWSD03MMC"]
 PVVX_DEVICE_TYPE: Final = 0x0A1C  # Device type in advertisements
 ATC1441_DEVICE_TYPE: Final = 0x181A
 
+# Firmware version detection from BLE manufacturer data
+# ATC_MiThermometer firmware embeds version in manufacturer-specific data
+VERSION_BYTE_MAJOR: Final = 4  # Byte offset for major version number
+VERSION_BYTE_MINOR: Final = 5  # Byte offset for minor version number
+MIN_MANUFACTURER_DATA_LEN: Final = 6  # Minimum length for version detection
+
 # Attributes
 ATTR_CURRENT_VERSION: Final = "current_version"
 ATTR_LATEST_VERSION: Final = "latest_version"

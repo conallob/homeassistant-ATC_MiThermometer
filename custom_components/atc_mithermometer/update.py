@@ -231,8 +231,24 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
 
             # Progress callback that updates the entity state
             def progress_callback(current: int, total: int) -> None:
-                """Update progress during flash."""
+                """Update progress during flash.
+
+                Args:
+                    current: Current progress (chunks transferred)
+                    total: Total chunks to transfer
+
+                Validates that current <= total to prevent invalid progress values.
+                """
                 if total > 0:
+                    # Validate progress values
+                    if current > total:
+                        _LOGGER.warning(
+                            "Invalid progress: current (%d) > total (%d), capping at 100%%",
+                            current,
+                            total,
+                        )
+                        current = total
+
                     # Map progress from DOWNLOAD_COMPLETE to near COMPLETE
                     progress = PROGRESS_DOWNLOAD_COMPLETE + int(
                         (current / total) * PROGRESS_FLASH_RANGE
