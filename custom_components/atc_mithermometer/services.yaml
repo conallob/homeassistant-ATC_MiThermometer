@@ -1,0 +1,37 @@
+apply_firmware:
+  name: Apply Firmware
+  description: >
+    Apply firmware to an ATC MiThermometer device programmatically.
+
+    ⚠️ SECURITY WARNING: This service will flash firmware to your device WITHOUT additional confirmation prompts.
+    Flashing incorrect or corrupted firmware can permanently damage your device (brick it).
+
+    Safety features:
+    - Firmware is downloaded only via HTTPS
+    - SHA256/SHA512 checksums are validated when available
+    - Firmware size is validated (1KB - 512KB)
+    - Only proceeds if desired version differs from current version
+
+    Recommendations:
+    - Test firmware updates manually through the UI first
+    - Only use this service in trusted automations
+    - Ensure you have the correct version number
+    - Keep devices accessible in case recovery is needed
+
+    The service will check if the current firmware version matches the desired version.
+    If they match, no action is taken. If they differ, firmware will be downloaded and flashed.
+  fields:
+    device_id:
+      name: Device
+      description: The ATC MiThermometer device to update.
+      required: true
+      selector:
+        device:
+          integration: atc_mithermometer
+    desired_version:
+      name: Desired Version
+      description: The desired firmware version to apply (e.g., "v4.5"). If this doesn't match the current version, the firmware will be updated.
+      required: true
+      example: "v4.5"
+      selector:
+        text:

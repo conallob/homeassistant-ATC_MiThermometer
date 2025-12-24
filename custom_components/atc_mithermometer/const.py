@@ -37,7 +37,9 @@ CHAR_UUID_OTA_CONTROL: Final = "00010203-0405-0607-0809-0a0b0c0d1912"
 CHAR_UUID_OTA_DATA: Final = "00010203-0405-0607-0809-0a0b0c0d1910"
 
 # Update settings
-UPDATE_CHECK_INTERVAL: Final = timedelta(hours=1)  # Check for updates every hour
+# Check for updates every 6 hours to avoid GitHub API rate limits
+# GitHub has a rate limit of 60 requests/hour for unauthenticated requests
+UPDATE_CHECK_INTERVAL: Final = timedelta(hours=6)
 FLASH_TIMEOUT: Final = 300  # 5 minutes timeout for flashing
 CHUNK_SIZE: Final = 244  # BLE MTU size for firmware chunks
 
@@ -59,6 +61,12 @@ PROGRESS_COMPLETE: Final = 100
 ATC_NAME_PREFIXES: Final = ["ATC_", "LYWSD03MMC"]
 PVVX_DEVICE_TYPE: Final = 0x0A1C  # Device type in advertisements
 ATC1441_DEVICE_TYPE: Final = 0x181A
+
+# Firmware version detection from BLE manufacturer data
+# ATC_MiThermometer firmware embeds version in manufacturer-specific data
+VERSION_BYTE_MAJOR: Final = 4  # Byte offset for major version number
+VERSION_BYTE_MINOR: Final = 5  # Byte offset for minor version number
+MIN_MANUFACTURER_DATA_LEN: Final = 6  # Minimum length for version detection
 
 # Attributes
 ATTR_CURRENT_VERSION: Final = "current_version"

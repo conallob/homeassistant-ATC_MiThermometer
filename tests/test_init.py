@@ -9,6 +9,7 @@ from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.atc_mithermometer import (
+    _versions_equal,
     async_setup_entry,
     async_unload_entry,
     get_atc_devices_from_bthome,
@@ -65,6 +66,38 @@ class TestIsATCMiThermometer:
         assert is_atc_mithermometer("MyATC_Device", []) is False
 
 
+class TestVersionsEqual:
+    """Test _versions_equal function."""
+
+    def test_equal_versions_simple(self):
+        """Test equal version strings."""
+        assert _versions_equal("1.0.0", "1.0.0") is True
+        assert _versions_equal("2.5", "2.5") is True
+
+    def test_equal_versions_with_prefix(self):
+        """Test versions with v prefix are equal."""
+        assert _versions_equal("v1.0.0", "1.0.0") is True
+        assert _versions_equal("1.0.0", "v1.0.0") is True
+        assert _versions_equal("v1.0.0", "v1.0.0") is True
+
+    def test_different_versions(self):
+        """Test different versions are not equal."""
+        assert _versions_equal("1.0.0", "1.0.1") is False
+        assert _versions_equal("1.0", "2.0") is False
+        assert _versions_equal("v1.0.0", "v2.0.0") is False
+
+    def test_different_precision_equal(self):
+        """Test versions with different precision."""
+        # Note: packaging treats "1.0" and "1.0.0" as equal
+        assert _versions_equal("1.0", "1.0.0") is True
+
+    def test_invalid_version_fallback_to_string(self):
+        """Test invalid versions fall back to string comparison."""
+        # Invalid versions that can't be parsed should use string comparison
+        assert _versions_equal("custom-v1", "custom-v1") is True
+        assert _versions_equal("custom-v1", "custom-v2") is False
+
+
 async def test_async_setup_entry(hass: HomeAssistant):
     """Test setting up a config entry."""
     entry = MockConfigEntry(
@@ -94,7 +127,7 @@ async def test_async_setup_entry(hass: HomeAssistant):
         )
 
         # Verify platforms were set up
-        mock_forward.assert_called_once_with(entry, [Platform.UPDATE])
+        mock_forward.assert_called_once_with(entry, [Platform.SENSOR, Platform.UPDATE])
 
 
 async def test_async_setup_entry_links_to_bthome_device(hass: HomeAssistant):
@@ -187,7 +220,7 @@ async def test_async_unload_entry(hass: HomeAssistant):
 
         assert result is True
         assert entry.entry_id not in hass.data[DOMAIN]
-        mock_unload.assert_called_once_with(entry, [Platform.UPDATE])
+        mock_unload.assert_called_once_with(entry, [Platform.SENSOR, Platform.UPDATE])
 
 
 async def test_async_unload_entry_fails(hass: HomeAssistant):

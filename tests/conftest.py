@@ -1,10 +1,29 @@
 """Fixtures for ATC MiThermometer Manager tests."""
 
+# Mock bluetooth-related modules before any imports
+# This prevents import errors when homeassistant.components.bluetooth
+# tries to import the serial module
+import sys
+from unittest.mock import MagicMock
+
+# Mock the serial module and bluetooth component
+# We need to mock serial.tools.list_ports_common which is imported by Home Assistant's USB component
+mock_serial = MagicMock()
+mock_serial_tools = MagicMock()
+mock_list_ports = MagicMock()
+mock_list_ports_common = MagicMock()
+
+# Create a mock ListPortInfo class
+mock_list_ports_common.ListPortInfo = MagicMock
+
+sys.modules["serial"] = mock_serial
+sys.modules["serial.tools"] = mock_serial_tools
+sys.modules["serial.tools.list_ports"] = mock_list_ports
+sys.modules["serial.tools.list_ports_common"] = mock_list_ports_common
+
 # Enable pytest-homeassistant-custom-component plugin
 # This provides the hass fixture, enable_custom_integrations, and other Home Assistant testing utilities
 pytest_plugins = ["pytest_homeassistant_custom_component"]
-
-from unittest.mock import MagicMock
 
 import pytest
 
