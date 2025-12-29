@@ -144,12 +144,20 @@ class ATCFirmwareVersionSensor(CoordinatorEntity, SensorEntity):
     def native_value(self) -> str | None:
         """Return the current firmware version.
 
-        Returns None if version cannot be determined, which will display
-        as 'Unknown' or 'Unavailable' in the Home Assistant UI.
+        Returns:
+            str: Firmware version string (e.g., "4.3") if successfully detected
+            None: If version cannot be determined (device not reachable, BLE errors,
+                  or version detection failed). Home Assistant will display this as
+                  'Unavailable' in the UI.
+
+        Note:
+            Returning None (instead of "Unknown" string) is the correct approach
+            per Home Assistant conventions, as it properly indicates the entity
+            state is unavailable rather than having a known value of "Unknown".
         """
         version = self.coordinator.data.get(ATTR_CURRENT_VERSION)
-        # Explicitly return None if version is not available (None or empty string)
-        # This allows Home Assistant to properly show the entity as unavailable
+        # Return None if version is not available (None or empty string)
+        # This signals to Home Assistant that the entity state is unavailable
         if not version:
             return None
         return version

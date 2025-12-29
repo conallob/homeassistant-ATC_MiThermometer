@@ -17,8 +17,11 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
+    CHAR_UUID_FIRMWARE_REVISION,
+    CHAR_UUID_HARDWARE_REVISION,
     CHAR_UUID_OTA_CONTROL,
     CHAR_UUID_OTA_DATA,
+    CHAR_UUID_SOFTWARE_REVISION,
     CHUNK_SIZE,
     FIRMWARE_SOURCES,
     FLASH_TIMEOUT,
@@ -622,27 +625,26 @@ class FirmwareManager:
         return True
 
     async def get_current_version(self) -> str | None:
-        """Get current firmware version from device via BLE advertisements.
+        """Get current firmware version by reading Device Information Service.
 
-        The ATC_MiThermometer firmware includes version information in the
-        manufacturer-specific data of BLE advertisements. This method attempts
-        to extract the version by parsing the manufacturer data.
+        Connects to the device and reads the Software Revision String characteristic
+        from the standard BLE Device Information Service (0x180A), just like the
+        web flasher tool does.
 
         Version Detection Strategy:
-        1. First attempts to get the device from the BLE address
-        2. Reads the most recent BLE advertisement (service info)
-        3. Parses manufacturer data looking for version bytes
-        4. Version format: bytes 4-5 contain major.minor version (e.g., "4.5")
+        1. Connect to the device via BLE
+        2. Read Software Revision String characteristic (0x2A28)
+        3. Parse version string (e.g., "V4.3" -> "4.3")
+        4. Fallback to manufacturer data if GATT read fails
 
         Returns:
-            str: Version string (e.g., "4.5") if successfully detected
-            None: If device not available, no manufacturer data, or parsing fails
+            str: Version string (e.g., "4.3") if successfully detected
+            None: If device not available, connection fails, or reading fails
 
         Note:
-            This method does not connect to the device - it only reads
-            advertisement data, making it fast and battery-efficient.
-            The manufacturer data format is firmware-specific and may
-            vary between ATC_MiThermometer versions.
+            This method connects to the device to read GATT characteristics,
+            which is more reliable than parsing advertisement data but uses
+            slightly more battery.
         """
         try:
             ble_device = bluetooth.async_ble_device_from_address(
@@ -653,54 +655,62 @@ class FirmwareManager:
                 _LOGGER.debug("Device %s not available", self.mac_address)
                 return None
 
-            # Try to get version from advertisement data first
+            # Try to read version from Device Information Service
+            try:
+                async with BleakClient(ble_device, timeout=30) as client:
+                    if not client.is_connected:
+                        _LOGGER.debug("Failed to connect to device %s", self.mac_address)
+                        return None
+
+                    # Read Software Revision String (0x2A28)
+                    software_revision = await client.read_gatt_char(
+                        CHAR_UUID_SOFTWARE_REVISION
+                    )
+
+                    if software_revision:
+                        # Decode bytes to string
+                        version_str = software_revision.decode("utf-8").strip()
+                        # Remove common prefix like "V" or "v"
+                        version_str = version_str.lstrip("Vv")
+                        _LOGGER.info(
+                            "Detected firmware version %s from Device Information Service",
+                            version_str,
+                        )
+                        return version_str
+
+            except (BleakError, TimeoutError) as err:
+                _LOGGER.debug(
+                    "Could not read version from Device Information Service: %s", err
+                )
+                # Fall through to try manufacturer data
+
+            # Fallback: Try to parse version from manufacturer data
             service_info = bluetooth.async_last_service_info(
                 self.hass, self.mac_address, connectable=True
             )
 
             if service_info and service_info.manufacturer_data:
-                # Parse version from manufacturer data if present
-                # This is device-specific and may need adjustment
                 for _mfr_id, data in service_info.manufacturer_data.items():
                     try:
-                        # Validate data length before accessing version bytes
                         if len(data) < MIN_MANUFACTURER_DATA_LEN:
-                            _LOGGER.debug(
-                                "Manufacturer data too short (%d bytes, need %d) for version detection",
-                                len(data),
-                                MIN_MANUFACTURER_DATA_LEN,
-                            )
                             continue
 
-                        # Extract version from predefined byte positions
-                        # ATC_MiThermometer firmware stores version at bytes 4-5
                         major = data[VERSION_BYTE_MAJOR]
                         minor = data[VERSION_BYTE_MINOR]
 
-                        # Validate version numbers are reasonable (0-99 each)
                         if not (0 <= major <= 99 and 0 <= minor <= 99):
-                            _LOGGER.debug(
-                                "Version bytes out of range: %d.%d (expected 0-99)",
-                                major,
-                                minor,
-                            )
                             continue
 
                         version_str = f"{major}.{minor}"
                         _LOGGER.debug(
-                            "Detected version %s from advertisements", version_str
+                            "Detected version %s from manufacturer data (fallback)",
+                            version_str,
                         )
                         return version_str
-                    except (IndexError, KeyError, ValueError, TypeError) as err:
-                        # Firmware format may have changed or data is malformed
-                        _LOGGER.debug(
-                            "Could not parse version from manufacturer data: %s", err
-                        )
+                    except (IndexError, KeyError, ValueError, TypeError):
                         continue
 
-            # Fallback: try reading from device info service
-            # This would require connecting to the device
-            _LOGGER.debug("Could not determine version from advertisements")
+            _LOGGER.debug("Could not determine firmware version for %s", self.mac_address)
             return None
 
         except (BleakError, HomeAssistantError) as err:
