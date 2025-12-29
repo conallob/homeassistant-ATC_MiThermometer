@@ -86,7 +86,13 @@ class TestFirmwareManager:
 
     def test_firmware_manager_init(self, hass: HomeAssistant):
         """Test firmware manager initialization."""
-        manager = FirmwareManager(hass, "AA:BB:CC:DD:EE:FF")
+        # Mock async_get_clientsession to avoid event loop issues
+        mock_session = MagicMock()
+        with patch(
+            "custom_components.atc_mithermometer.firmware.async_get_clientsession",
+            return_value=mock_session,
+        ):
+            manager = FirmwareManager(hass, "AA:BB:CC:DD:EE:FF")
 
         assert manager.hass == hass
         assert manager.mac_address == "AA:BB:CC:DD:EE:FF"

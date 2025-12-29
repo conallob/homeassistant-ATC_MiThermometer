@@ -669,77 +669,79 @@ class FirmwareManager:
                 async with BleakClient(ble_device, timeout=30) as client:
                     if not client.is_connected:
                         _LOGGER.debug(
-                            "Failed to connect to device %s", self.mac_address
-                        )
-                        return None
-
-                    # Read Software Revision String (0x2A28)
-                    software_revision = await client.read_gatt_char(
-                        CHAR_UUID_SOFTWARE_REVISION
-                    )
-
-                    # Check for None or empty response
-                    if software_revision is None or not software_revision:
-                        _LOGGER.debug(
-                            "Empty or None response from Software Revision for %s",
+                            "Failed to connect to device %s. Falling back to "
+                            "manufacturer data.",
                             self.mac_address,
                         )
-                        # Continue to fallback
+                        # Don't return here - fall through to manufacturer data fallback
                     else:
-                        try:
-                            # Decode bytes to string with strict UTF-8 validation
-                            # Invalid UTF-8 will raise UnicodeDecodeError and trigger fallback
-                            version_str = software_revision.decode("utf-8").strip()
+                        # Read Software Revision String (0x2A28)
+                        software_revision = await client.read_gatt_char(
+                            CHAR_UUID_SOFTWARE_REVISION
+                        )
 
-                            # Check for empty string after decode
-                            if not version_str:
-                                _LOGGER.debug(
-                                    "Empty version string after decode for %s",
-                                    self.mac_address,
-                                )
-                                # Continue to fallback
-                            else:
-                                # Check for excessive length (potential attack or corruption)
-                                if len(version_str) > MAX_VERSION_LENGTH:
-                                    _LOGGER.warning(
-                                        "Version string exceeds max length (%d > %d) for %s, "
-                                        "falling back to manufacturer data",
-                                        len(version_str),
-                                        MAX_VERSION_LENGTH,
+                        # Check for None or empty response
+                        if software_revision is None or not software_revision:
+                            _LOGGER.debug(
+                                "Empty or None response from Software Revision for %s",
+                                self.mac_address,
+                            )
+                            # Continue to fallback
+                        else:
+                            try:
+                                # Decode bytes to string with strict UTF-8 validation
+                                # Invalid UTF-8 will raise UnicodeDecodeError and trigger fallback
+                                version_str = software_revision.decode("utf-8").strip()
+
+                                # Check for empty string after decode
+                                if not version_str:
+                                    _LOGGER.debug(
+                                        "Empty version string after decode for %s",
                                         self.mac_address,
                                     )
                                     # Continue to fallback
                                 else:
-                                    # Remove version prefix if present (e.g., "V4.3" -> "4.3")
-                                    # Check if first character is a version prefix
-                                    if version_str and version_str[0] in VERSION_PREFIX_CHARS:
-                                        version_str = version_str[1:]
-
-                                    # Validate version format with regex
-                                    if not re.match(VERSION_VALIDATION_PATTERN, version_str):
-                                        _LOGGER.debug(
-                                            "Version string '%s' does not match expected format "
-                                            "for %s, falling back to manufacturer data",
-                                            version_str,
+                                    # Check for excessive length (potential attack or corruption)
+                                    if len(version_str) > MAX_VERSION_LENGTH:
+                                        _LOGGER.warning(
+                                            "Version string exceeds max length (%d > %d) for %s, "
+                                            "falling back to manufacturer data",
+                                            len(version_str),
+                                            MAX_VERSION_LENGTH,
                                             self.mac_address,
                                         )
                                         # Continue to fallback
                                     else:
-                                        _LOGGER.info(
-                                            "Detected firmware version %s from Device "
-                                            "Information Service",
-                                            version_str,
-                                        )
-                                        return version_str
+                                        # Remove version prefix if present (e.g., "V4.3" -> "4.3")
+                                        # Check if first character is a version prefix
+                                        if version_str and version_str[0] in VERSION_PREFIX_CHARS:
+                                            version_str = version_str[1:]
 
-                        except UnicodeDecodeError as err:
-                            _LOGGER.debug(
-                                "Invalid UTF-8 in version string for %s: %s. "
-                                "Falling back to manufacturer data.",
-                                self.mac_address,
-                                err,
-                            )
-                            # Continue to fallback
+                                        # Validate version format with regex
+                                        if not re.match(VERSION_VALIDATION_PATTERN, version_str):
+                                            _LOGGER.debug(
+                                                "Version string '%s' does not match expected format "
+                                                "for %s, falling back to manufacturer data",
+                                                version_str,
+                                                self.mac_address,
+                                            )
+                                            # Continue to fallback
+                                        else:
+                                            _LOGGER.info(
+                                                "Detected firmware version %s from Device "
+                                                "Information Service",
+                                                version_str,
+                                            )
+                                            return version_str
+
+                            except UnicodeDecodeError as err:
+                                _LOGGER.debug(
+                                    "Invalid UTF-8 in version string for %s: %s. "
+                                    "Falling back to manufacturer data.",
+                                    self.mac_address,
+                                    err,
+                                )
+                                # Continue to fallback
 
             except (BleakError, TimeoutError) as err:
                 # Use DEBUG level for expected fallback scenarios (characteristic not found)
