@@ -728,16 +728,22 @@ class TestFirmwareManager:
             assert version == "1.2"
 
     async def test_get_current_version_gatt_utf8_error(self, firmware_manager):
-        """Test GATT version with invalid UTF-8 bytes."""
+        """Test GATT version with invalid UTF-8 bytes falls back to manufacturer data."""
         mock_ble_device = MagicMock()
         mock_client = AsyncMock(spec=BleakClient)
         mock_client.is_connected = True
-        # Invalid UTF-8 sequence that should be handled gracefully
+        # Invalid UTF-8 sequence that should trigger fallback
         mock_client.read_gatt_char = AsyncMock(
             return_value=b"V4.\xff\xfe3"  # Invalid UTF-8
         )
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock()
+
+        # Mock manufacturer data for fallback
+        mock_service_info = MagicMock()
+        mock_service_info.manufacturer_data = {
+            0x0001: bytes([0x00, 0x01, 0x02, 0x03, 0x04, 0x05])  # version 4.5 fallback
+        }
 
         with (
             patch(
@@ -748,11 +754,15 @@ class TestFirmwareManager:
                 "custom_components.atc_mithermometer.firmware.BleakClient",
                 return_value=mock_client,
             ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
+                return_value=mock_service_info,
+            ),
         ):
             version = await firmware_manager.get_current_version()
 
-            # Should decode with errors="ignore" and get "V4.3"
-            assert version == "4.3"
+            # Should fall back to manufacturer data when UTF-8 decode fails
+            assert version == "4.5"
 
     async def test_get_current_version_gatt_timeout_fallback(self, firmware_manager):
         """Test GATT timeout with fallback to manufacturer data."""
@@ -888,3 +898,37 @@ class TestFirmwareManager:
 
             # Should fall back to manufacturer data
             assert version == "1.5"
+
+    async def test_get_current_version_gatt_none_response(self, firmware_manager):
+        """Test GATT with None response falls back to manufacturer data."""
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = True
+        # Return None instead of bytes
+        mock_client.read_gatt_char = AsyncMock(return_value=None)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock()
+
+        mock_service_info = MagicMock()
+        mock_service_info.manufacturer_data = {
+            0x0001: bytes([0x00, 0x01, 0x02, 0x03, 0x02, 0x03])  # version 2.3
+        }
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
+                return_value=mock_service_info,
+            ),
+        ):
+            version = await firmware_manager.get_current_version()
+
+            # Should fall back to manufacturer data when GATT returns None
+            assert version == "2.3"

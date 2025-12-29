@@ -74,6 +74,10 @@ VERSION_BYTE_MINOR: Final = 5  # Byte offset for minor version number
 MIN_MANUFACTURER_DATA_LEN: Final = 6  # Minimum length for version detection
 # Common version string prefixes to strip (e.g., "V4.3" -> "4.3")
 VERSION_PREFIX_CHARS: Final = ("V", "v")
+# Version string validation pattern (semantic versioning: major.minor[.patch][.build])
+# Limits: 1-3 digits per component, max 4 components, max 20 chars total
+VERSION_VALIDATION_PATTERN: Final = r"^(\d{1,3}\.){1,3}\d{1,3}$"
+MAX_VERSION_LENGTH: Final = 20  # Maximum reasonable version string length
 
 # Attributes
 ATTR_CURRENT_VERSION: Final = "current_version"

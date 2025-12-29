@@ -24,6 +24,7 @@ from .const import (
     FIRMWARE_SOURCES,
     FLASH_TIMEOUT,
     MAX_FIRMWARE_SIZE,
+    MAX_VERSION_LENGTH,
     MIN_FIRMWARE_SIZE,
     MIN_MANUFACTURER_DATA_LEN,
     OTA_CHUNK_DELAY,
@@ -31,6 +32,7 @@ from .const import (
     VERSION_BYTE_MAJOR,
     VERSION_BYTE_MINOR,
     VERSION_PREFIX_CHARS,
+    VERSION_VALIDATION_PATTERN,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -676,49 +678,85 @@ class FirmwareManager:
                         CHAR_UUID_SOFTWARE_REVISION
                     )
 
-                    if software_revision:
+                    # Check for None or empty response
+                    if software_revision is None or not software_revision:
+                        _LOGGER.debug(
+                            "Empty or None response from Software Revision for %s",
+                            self.mac_address,
+                        )
+                        # Continue to fallback
+                    else:
                         try:
-                            # Decode bytes to string with error handling
-                            # Use errors="ignore" to skip invalid UTF-8 bytes
-                            version_str = software_revision.decode(
-                                "utf-8", errors="ignore"
-                            ).strip()
+                            # Decode bytes to string with strict UTF-8 validation
+                            # Invalid UTF-8 will raise UnicodeDecodeError and trigger fallback
+                            version_str = software_revision.decode("utf-8").strip()
 
-                            # Remove version prefix if present (e.g., "V4.3" -> "4.3")
-                            # Use startswith to only remove prefix, not all V/v chars
-                            if version_str.startswith(VERSION_PREFIX_CHARS):
-                                version_str = version_str[1:]
-
-                            # Validate that we have a non-empty version string
+                            # Check for empty string after decode
                             if not version_str:
                                 _LOGGER.debug(
-                                    "Empty version string after parsing for %s",
+                                    "Empty version string after decode for %s",
                                     self.mac_address,
                                 )
                                 # Continue to fallback
                             else:
-                                _LOGGER.info(
-                                    "Detected firmware version %s from Device "
-                                    "Information Service",
-                                    version_str,
-                                )
-                                return version_str
+                                # Check for excessive length (potential attack or corruption)
+                                if len(version_str) > MAX_VERSION_LENGTH:
+                                    _LOGGER.warning(
+                                        "Version string exceeds max length (%d > %d) for %s, "
+                                        "falling back to manufacturer data",
+                                        len(version_str),
+                                        MAX_VERSION_LENGTH,
+                                        self.mac_address,
+                                    )
+                                    # Continue to fallback
+                                else:
+                                    # Remove version prefix if present (e.g., "V4.3" -> "4.3")
+                                    # Check if first character is a version prefix
+                                    if version_str and version_str[0] in VERSION_PREFIX_CHARS:
+                                        version_str = version_str[1:]
 
-                        except (UnicodeDecodeError, AttributeError) as err:
+                                    # Validate version format with regex
+                                    if not re.match(VERSION_VALIDATION_PATTERN, version_str):
+                                        _LOGGER.debug(
+                                            "Version string '%s' does not match expected format "
+                                            "for %s, falling back to manufacturer data",
+                                            version_str,
+                                            self.mac_address,
+                                        )
+                                        # Continue to fallback
+                                    else:
+                                        _LOGGER.info(
+                                            "Detected firmware version %s from Device "
+                                            "Information Service",
+                                            version_str,
+                                        )
+                                        return version_str
+
+                        except UnicodeDecodeError as err:
                             _LOGGER.debug(
-                                "Error decoding version string for %s: %s",
+                                "Invalid UTF-8 in version string for %s: %s. "
+                                "Falling back to manufacturer data.",
                                 self.mac_address,
                                 err,
                             )
                             # Continue to fallback
 
             except (BleakError, TimeoutError) as err:
-                _LOGGER.warning(
-                    "Could not read version from Device Information Service for "
-                    "%s: %s. Falling back to manufacturer data parsing.",
-                    self.mac_address,
-                    err,
-                )
+                # Use DEBUG level for expected fallback scenarios (characteristic not found)
+                # Use WARNING level for unexpected errors (timeout, connection issues)
+                if isinstance(err, BleakError) and "not found" in str(err).lower():
+                    _LOGGER.debug(
+                        "Software Revision characteristic not found for %s. "
+                        "Falling back to manufacturer data parsing.",
+                        self.mac_address,
+                    )
+                else:
+                    _LOGGER.warning(
+                        "Could not read version from Device Information Service for "
+                        "%s: %s. Falling back to manufacturer data parsing.",
+                        self.mac_address,
+                        err,
+                    )
                 # Fall through to try manufacturer data
 
             # Fallback: Try to parse version from manufacturer data
