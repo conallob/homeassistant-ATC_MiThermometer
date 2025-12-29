@@ -17,8 +17,6 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
-    CHAR_UUID_FIRMWARE_REVISION,
-    CHAR_UUID_HARDWARE_REVISION,
     CHAR_UUID_OTA_CONTROL,
     CHAR_UUID_OTA_DATA,
     CHAR_UUID_SOFTWARE_REVISION,
@@ -466,7 +464,10 @@ class FirmwareManager:
             return match.group(1).lower(), "sha256"
 
         # Format: SHA256(<filename>)= <hash>
-        sha256_pattern2 = rf"SHA256\s*\(\s*{re.escape(firmware_filename)}\s*\)\s*=\s*([a-fA-F0-9]{{64}})"
+        sha256_pattern2 = (
+            rf"SHA256\s*\(\s*{re.escape(firmware_filename)}\s*\)\s*=\s*"
+            r"([a-fA-F0-9]{64})"
+        )
         match = re.search(sha256_pattern2, release_body, re.IGNORECASE)
         if match:
             return match.group(1).lower(), "sha256"
@@ -504,7 +505,8 @@ class FirmwareManager:
             _LOGGER.warning(
                 "No checksum provided for firmware validation. "
                 "Firmware integrity cannot be verified. "
-                "This is a security risk - firmware could be corrupted or tampered with."
+                "This is a security risk - firmware could be corrupted or "
+                "tampered with."
             )
             return True
 
@@ -514,8 +516,8 @@ class FirmwareManager:
         if checksum_type_lower in ("md5", "sha1"):
             _LOGGER.error(
                 "SECURITY: Rejecting firmware with %s checksum. "
-                "%s is cryptographically broken and cannot guarantee firmware integrity. "
-                "Only SHA256 and SHA512 are accepted.",
+                "%s is cryptographically broken and cannot guarantee "
+                "firmware integrity. Only SHA256 and SHA512 are accepted.",
                 checksum_type_lower.upper(),
                 checksum_type_lower.upper(),
             )
@@ -529,7 +531,8 @@ class FirmwareManager:
                 calculated = hashlib.sha512(firmware_data).hexdigest()
             else:
                 _LOGGER.error(
-                    "Unsupported checksum type: %s. Only SHA256 and SHA512 are supported.",
+                    "Unsupported checksum type: %s. "
+                    "Only SHA256 and SHA512 are supported.",
                     checksum_type,
                 )
                 return False
@@ -659,7 +662,9 @@ class FirmwareManager:
             try:
                 async with BleakClient(ble_device, timeout=30) as client:
                     if not client.is_connected:
-                        _LOGGER.debug("Failed to connect to device %s", self.mac_address)
+                        _LOGGER.debug(
+                            "Failed to connect to device %s", self.mac_address
+                        )
                         return None
 
                     # Read Software Revision String (0x2A28)
@@ -673,7 +678,8 @@ class FirmwareManager:
                         # Remove common prefix like "V" or "v"
                         version_str = version_str.lstrip("Vv")
                         _LOGGER.info(
-                            "Detected firmware version %s from Device Information Service",
+                            "Detected firmware version %s from Device "
+                            "Information Service",
                             version_str,
                         )
                         return version_str
@@ -710,7 +716,9 @@ class FirmwareManager:
                     except (IndexError, KeyError, ValueError, TypeError):
                         continue
 
-            _LOGGER.debug("Could not determine firmware version for %s", self.mac_address)
+            _LOGGER.debug(
+                "Could not determine firmware version for %s", self.mac_address
+            )
             return None
 
         except (BleakError, HomeAssistantError) as err:

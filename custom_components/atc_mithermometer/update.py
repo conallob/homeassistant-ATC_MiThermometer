@@ -14,7 +14,6 @@ from homeassistant.components.update import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
@@ -245,7 +244,8 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
                     # Validate progress values
                     if current > total:
                         _LOGGER.warning(
-                            "Invalid progress: current (%d) > total (%d), capping at 100%%",
+                            "Invalid progress: current (%d) > total (%d), "
+                            "capping at 100%%",
                             current,
                             total,
                         )
