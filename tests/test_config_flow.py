@@ -377,7 +377,7 @@ class TestConfigFlow:
             ),
             patch(
                 "custom_components.atc_mithermometer.config_flow.get_atc_devices_from_bthome",
-                side_effect=Exception("Test error"),
+                side_effect=KeyError("Test error"),
             ),
         ):
             flow = ATCMiThermometerConfigFlow()
@@ -437,5 +437,5 @@ class TestOptionsFlow:
         # Default should be the current source
         schema_dict = result["data_schema"].schema
         for key in schema_dict:
-            if hasattr(key, "description") and key.description.get("suggested_value"):
+            if hasattr(key, "description") and key.description and key.description.get("suggested_value"):
                 assert False, "No suggested value should be set"
