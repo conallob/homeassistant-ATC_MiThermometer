@@ -72,12 +72,15 @@ async def test_async_setup_entry(
     hass: HomeAssistant, mock_config_entry, mock_firmware_manager, mock_bthome_device
 ):
     """Test setting up the update platform."""
-    with patch(
-        "custom_components.atc_mithermometer.update.FirmwareManager",
-        return_value=mock_firmware_manager,
-    ), patch(
-        "custom_components.atc_mithermometer.update.get_bthome_device_by_mac",
-        return_value=mock_bthome_device,
+    with (
+        patch(
+            "custom_components.atc_mithermometer.update.FirmwareManager",
+            return_value=mock_firmware_manager,
+        ),
+        patch(
+            "custom_components.atc_mithermometer.update.get_bthome_device_by_mac",
+            return_value=mock_bthome_device,
+        ),
     ):
         async_add_entities = MagicMock()
 

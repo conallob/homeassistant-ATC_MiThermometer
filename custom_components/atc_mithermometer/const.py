@@ -72,6 +72,8 @@ ATC1441_DEVICE_TYPE: Final = 0x181A
 VERSION_BYTE_MAJOR: Final = 4  # Byte offset for major version number
 VERSION_BYTE_MINOR: Final = 5  # Byte offset for minor version number
 MIN_MANUFACTURER_DATA_LEN: Final = 6  # Minimum length for version detection
+# Common version string prefixes to strip (e.g., "V4.3" -> "4.3")
+VERSION_PREFIX_CHARS: Final = ("V", "v")
 
 # Attributes
 ATTR_CURRENT_VERSION: Final = "current_version"

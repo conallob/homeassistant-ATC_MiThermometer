@@ -279,9 +279,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Remove service if this is the last config entry for this integration
         # Check is done within the event loop so it's thread-safe
         # Also verify service exists before attempting removal
-        if (
-            not hass.config_entries.async_entries(DOMAIN)
-            and hass.services.has_service(DOMAIN, SERVICE_APPLY_FIRMWARE)
+        if not hass.config_entries.async_entries(DOMAIN) and hass.services.has_service(
+            DOMAIN, SERVICE_APPLY_FIRMWARE
         ):
             try:
                 hass.services.async_remove(DOMAIN, SERVICE_APPLY_FIRMWARE)

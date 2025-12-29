@@ -109,10 +109,13 @@ async def test_async_setup_entry(hass: HomeAssistant):
     )
     entry.add_to_hass(hass)
 
-    with patch(
-        "custom_components.atc_mithermometer.get_bthome_device_by_mac",
-        return_value=None,
-    ), patch.object(hass.config_entries, "async_forward_entry_setups") as mock_forward:
+    with (
+        patch(
+            "custom_components.atc_mithermometer.get_bthome_device_by_mac",
+            return_value=None,
+        ),
+        patch.object(hass.config_entries, "async_forward_entry_setups") as mock_forward,
+    ):
         result = await async_setup_entry(hass, entry)
 
         assert result is True
@@ -147,14 +150,16 @@ async def test_async_setup_entry_links_to_bthome_device(hass: HomeAssistant):
     mock_device_registry = MagicMock()
     mock_device_registry.async_update_device = MagicMock()
 
-    with patch(
-        "custom_components.atc_mithermometer.get_bthome_device_by_mac",
-        return_value=mock_device,
-    ), patch(
-        "custom_components.atc_mithermometer.dr.async_get",
-        return_value=mock_device_registry,
-    ), patch.object(
-        hass.config_entries, "async_forward_entry_setups"
+    with (
+        patch(
+            "custom_components.atc_mithermometer.get_bthome_device_by_mac",
+            return_value=mock_device,
+        ),
+        patch(
+            "custom_components.atc_mithermometer.dr.async_get",
+            return_value=mock_device_registry,
+        ),
+        patch.object(hass.config_entries, "async_forward_entry_setups"),
     ):
         result = await async_setup_entry(hass, entry)
 
@@ -183,14 +188,16 @@ async def test_async_setup_entry_handles_device_link_error(hass: HomeAssistant):
         side_effect=ValueError("Test error")
     )
 
-    with patch(
-        "custom_components.atc_mithermometer.get_bthome_device_by_mac",
-        return_value=mock_device,
-    ), patch(
-        "custom_components.atc_mithermometer.dr.async_get",
-        return_value=mock_device_registry,
-    ), patch.object(
-        hass.config_entries, "async_forward_entry_setups"
+    with (
+        patch(
+            "custom_components.atc_mithermometer.get_bthome_device_by_mac",
+            return_value=mock_device,
+        ),
+        patch(
+            "custom_components.atc_mithermometer.dr.async_get",
+            return_value=mock_device_registry,
+        ),
+        patch.object(hass.config_entries, "async_forward_entry_setups"),
     ):
         # Should not raise, continues setup
         result = await async_setup_entry(hass, entry)
@@ -268,16 +275,20 @@ async def test_get_atc_devices_from_bthome(hass: HomeAssistant):
 
     mock_device_registry = MagicMock()
 
-    with patch.object(
-        hass.config_entries,
-        "async_entries",
-        return_value=[mock_entry],
-    ), patch(
-        "custom_components.atc_mithermometer.dr.async_get",
-        return_value=mock_device_registry,
-    ), patch(
-        "custom_components.atc_mithermometer.dr.async_entries_for_config_entry",
-        return_value=[mock_device1, mock_device2, mock_device3],
+    with (
+        patch.object(
+            hass.config_entries,
+            "async_entries",
+            return_value=[mock_entry],
+        ),
+        patch(
+            "custom_components.atc_mithermometer.dr.async_get",
+            return_value=mock_device_registry,
+        ),
+        patch(
+            "custom_components.atc_mithermometer.dr.async_entries_for_config_entry",
+            return_value=[mock_device1, mock_device2, mock_device3],
+        ),
     ):
         devices = await get_atc_devices_from_bthome(hass)
 
@@ -301,16 +312,20 @@ async def test_get_atc_devices_from_bthome_no_duplicates(hass: HomeAssistant):
 
     mock_device_registry = MagicMock()
 
-    with patch.object(
-        hass.config_entries,
-        "async_entries",
-        return_value=[mock_entry1, mock_entry2],
-    ), patch(
-        "custom_components.atc_mithermometer.dr.async_get",
-        return_value=mock_device_registry,
-    ), patch(
-        "custom_components.atc_mithermometer.dr.async_entries_for_config_entry",
-        return_value=[mock_device],
+    with (
+        patch.object(
+            hass.config_entries,
+            "async_entries",
+            return_value=[mock_entry1, mock_entry2],
+        ),
+        patch(
+            "custom_components.atc_mithermometer.dr.async_get",
+            return_value=mock_device_registry,
+        ),
+        patch(
+            "custom_components.atc_mithermometer.dr.async_entries_for_config_entry",
+            return_value=[mock_device],
+        ),
     ):
         devices = await get_atc_devices_from_bthome(hass)
 
@@ -388,13 +403,16 @@ async def test_get_bthome_device_by_mac(hass: HomeAssistant):
     mock_device_registry = MagicMock()
     mock_device_registry.async_get_device = MagicMock(return_value=mock_device)
 
-    with patch(
-        "custom_components.atc_mithermometer.dr.async_get",
-        return_value=mock_device_registry,
-    ), patch.object(
-        hass.config_entries,
-        "async_get_entry",
-        return_value=mock_entry,
+    with (
+        patch(
+            "custom_components.atc_mithermometer.dr.async_get",
+            return_value=mock_device_registry,
+        ),
+        patch.object(
+            hass.config_entries,
+            "async_get_entry",
+            return_value=mock_entry,
+        ),
     ):
         result = await get_bthome_device_by_mac(hass, mac_address)
 
@@ -433,13 +451,16 @@ async def test_get_bthome_device_by_mac_not_bthome(hass: HomeAssistant):
     mock_device_registry = MagicMock()
     mock_device_registry.async_get_device = MagicMock(return_value=mock_device)
 
-    with patch(
-        "custom_components.atc_mithermometer.dr.async_get",
-        return_value=mock_device_registry,
-    ), patch.object(
-        hass.config_entries,
-        "async_get_entry",
-        return_value=mock_entry,
+    with (
+        patch(
+            "custom_components.atc_mithermometer.dr.async_get",
+            return_value=mock_device_registry,
+        ),
+        patch.object(
+            hass.config_entries,
+            "async_get_entry",
+            return_value=mock_entry,
+        ),
     ):
         result = await get_bthome_device_by_mac(hass, mac_address)
 

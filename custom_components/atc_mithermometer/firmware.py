@@ -30,6 +30,7 @@ from .const import (
     OTA_COMMAND_DELAY,
     VERSION_BYTE_MAJOR,
     VERSION_BYTE_MINOR,
+    VERSION_PREFIX_CHARS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -645,9 +646,12 @@ class FirmwareManager:
             None: If device not available, connection fails, or reading fails
 
         Note:
-            This method connects to the device to read GATT characteristics,
-            which is more reliable than parsing advertisement data but uses
-            slightly more battery.
+            This method connects to the device to read GATT characteristics.
+            The coordinator calls this method every UPDATE_CHECK_INTERVAL (6 hours),
+            so connection overhead is minimal. GATT characteristic reading is more
+            reliable than parsing advertisement data, ensuring accurate version
+            detection even when manufacturer data format varies between firmware
+            versions.
         """
         try:
             ble_device = bluetooth.async_ble_device_from_address(
@@ -673,20 +677,47 @@ class FirmwareManager:
                     )
 
                     if software_revision:
-                        # Decode bytes to string
-                        version_str = software_revision.decode("utf-8").strip()
-                        # Remove common prefix like "V" or "v"
-                        version_str = version_str.lstrip("Vv")
-                        _LOGGER.info(
-                            "Detected firmware version %s from Device "
-                            "Information Service",
-                            version_str,
-                        )
-                        return version_str
+                        try:
+                            # Decode bytes to string with error handling
+                            # Use errors="ignore" to skip invalid UTF-8 bytes
+                            version_str = software_revision.decode(
+                                "utf-8", errors="ignore"
+                            ).strip()
+
+                            # Remove version prefix if present (e.g., "V4.3" -> "4.3")
+                            # Use startswith to only remove prefix, not all V/v chars
+                            if version_str.startswith(VERSION_PREFIX_CHARS):
+                                version_str = version_str[1:]
+
+                            # Validate that we have a non-empty version string
+                            if not version_str:
+                                _LOGGER.debug(
+                                    "Empty version string after parsing for %s",
+                                    self.mac_address,
+                                )
+                                # Continue to fallback
+                            else:
+                                _LOGGER.info(
+                                    "Detected firmware version %s from Device "
+                                    "Information Service",
+                                    version_str,
+                                )
+                                return version_str
+
+                        except (UnicodeDecodeError, AttributeError) as err:
+                            _LOGGER.debug(
+                                "Error decoding version string for %s: %s",
+                                self.mac_address,
+                                err,
+                            )
+                            # Continue to fallback
 
             except (BleakError, TimeoutError) as err:
-                _LOGGER.debug(
-                    "Could not read version from Device Information Service: %s", err
+                _LOGGER.warning(
+                    "Could not read version from Device Information Service for "
+                    "%s: %s. Falling back to manufacturer data parsing.",
+                    self.mac_address,
+                    err,
                 )
                 # Fall through to try manufacturer data
 

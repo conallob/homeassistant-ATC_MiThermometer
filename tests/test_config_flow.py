@@ -118,13 +118,16 @@ class TestConfigFlow:
             "AA:BB:CC:DD:EE:FF": mock_bluetooth_service_info,
         }
 
-        with patch(
-            "custom_components.atc_mithermometer.config_flow.ATCMiThermometerConfigFlow._get_available_devices",
-            return_value=mock_devices,
-        ), patch.object(
-            hass.config_entries.flow,
-            "_async_current_entries",
-            return_value=[entry],
+        with (
+            patch(
+                "custom_components.atc_mithermometer.config_flow.ATCMiThermometerConfigFlow._get_available_devices",
+                return_value=mock_devices,
+            ),
+            patch.object(
+                hass.config_entries.flow,
+                "_async_current_entries",
+                return_value=[entry],
+            ),
         ):
             result = await hass.config_entries.flow.async_init(
                 DOMAIN,
@@ -284,12 +287,15 @@ class TestConfigFlow:
         mock_scanner = MagicMock()
         mock_scanner.discovered_devices = [mock_bluetooth_service_info]
 
-        with patch(
-            "custom_components.atc_mithermometer.config_flow.bluetooth.async_scanner_by_source",
-            return_value=mock_scanner,
-        ), patch(
-            "custom_components.atc_mithermometer.config_flow.get_atc_devices_from_bthome",
-            return_value=[],
+        with (
+            patch(
+                "custom_components.atc_mithermometer.config_flow.bluetooth.async_scanner_by_source",
+                return_value=mock_scanner,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.config_flow.get_atc_devices_from_bthome",
+                return_value=[],
+            ),
         ):
             flow = ATCMiThermometerConfigFlow()
             flow.hass = hass
@@ -306,12 +312,15 @@ class TestConfigFlow:
         mock_scanner = MagicMock()
         mock_scanner.discovered_devices = [mock_bluetooth_service_info]
 
-        with patch(
-            "custom_components.atc_mithermometer.config_flow.bluetooth.async_scanner_by_source",
-            return_value=mock_scanner,
-        ), patch(
-            "custom_components.atc_mithermometer.config_flow.get_atc_devices_from_bthome",
-            return_value=[],
+        with (
+            patch(
+                "custom_components.atc_mithermometer.config_flow.bluetooth.async_scanner_by_source",
+                return_value=mock_scanner,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.config_flow.get_atc_devices_from_bthome",
+                return_value=[],
+            ),
         ):
             flow = ATCMiThermometerConfigFlow()
             flow.hass = hass
@@ -329,18 +338,23 @@ class TestConfigFlow:
         mock_service_info.name = "ATC_123456"
         mock_service_info.address = "AA:BB:CC:DD:EE:FF"
 
-        with patch(
-            "custom_components.atc_mithermometer.config_flow.bluetooth.async_scanner_by_source",
-            return_value=None,
-        ), patch(
-            "custom_components.atc_mithermometer.config_flow.get_atc_devices_from_bthome",
-            return_value=[mock_device],
-        ), patch(
-            "custom_components.atc_mithermometer.config_flow.bluetooth.async_last_service_info",
-            return_value=mock_service_info,
-        ), patch(
-            "custom_components.atc_mithermometer.config_flow.dr.async_get",
-            return_value=MagicMock(),
+        with (
+            patch(
+                "custom_components.atc_mithermometer.config_flow.bluetooth.async_scanner_by_source",
+                return_value=None,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.config_flow.get_atc_devices_from_bthome",
+                return_value=[mock_device],
+            ),
+            patch(
+                "custom_components.atc_mithermometer.config_flow.bluetooth.async_last_service_info",
+                return_value=mock_service_info,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.config_flow.dr.async_get",
+                return_value=MagicMock(),
+            ),
         ):
             flow = ATCMiThermometerConfigFlow()
             flow.hass = hass
@@ -353,12 +367,15 @@ class TestConfigFlow:
         self, hass: HomeAssistant
     ):
         """Test get available devices handles BTHome errors gracefully."""
-        with patch(
-            "custom_components.atc_mithermometer.config_flow.bluetooth.async_scanner_by_source",
-            return_value=None,
-        ), patch(
-            "custom_components.atc_mithermometer.config_flow.get_atc_devices_from_bthome",
-            side_effect=Exception("Test error"),
+        with (
+            patch(
+                "custom_components.atc_mithermometer.config_flow.bluetooth.async_scanner_by_source",
+                return_value=None,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.config_flow.get_atc_devices_from_bthome",
+                side_effect=Exception("Test error"),
+            ),
         ):
             flow = ATCMiThermometerConfigFlow()
             flow.hass = hass
