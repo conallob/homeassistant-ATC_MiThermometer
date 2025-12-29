@@ -692,9 +692,7 @@ class FirmwareManager:
                                 # Decode bytes to string with strict UTF-8
                                 # validation. Invalid UTF-8 will raise
                                 # UnicodeDecodeError and trigger fallback
-                                version_str = software_revision.decode(
-                                    "utf-8"
-                                ).strip()
+                                version_str = software_revision.decode("utf-8").strip()
 
                                 # Check for empty string after decode
                                 if not version_str:
@@ -722,8 +720,7 @@ class FirmwareManager:
                                         # Check if first char is version prefix
                                         if (
                                             version_str
-                                            and version_str[0]
-                                            in VERSION_PREFIX_CHARS
+                                            and version_str[0] in VERSION_PREFIX_CHARS
                                         ):
                                             version_str = version_str[1:]
 
