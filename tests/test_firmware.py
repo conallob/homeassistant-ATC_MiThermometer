@@ -23,7 +23,14 @@ from custom_components.atc_mithermometer.firmware import (
 @pytest.fixture
 def firmware_manager(hass: HomeAssistant):
     """Create a firmware manager instance."""
-    return FirmwareManager(hass, "AA:BB:CC:DD:EE:FF")
+    # Mock async_get_clientsession to avoid event loop issues in __init__
+    mock_session = MagicMock()
+    with patch(
+        "custom_components.atc_mithermometer.firmware.async_get_clientsession",
+        return_value=mock_session,
+    ):
+        manager = FirmwareManager(hass, "AA:BB:CC:DD:EE:FF")
+    return manager
 
 
 @pytest.fixture

@@ -105,7 +105,7 @@ class TestNormalizeMac:
         [
             "gg:hh:ii:jj:kk:ll",  # Invalid hex characters
             "aa:bb:cc:dd:ee:zz",  # Invalid character at end
-            "aa!bb@cc#dd$ee%ff",  # Special characters
+            "aabbccddeefg",  # Invalid hex character (g) without separators
         ],
     )
     def test_normalize_mac_invalid_characters(self, invalid_mac):

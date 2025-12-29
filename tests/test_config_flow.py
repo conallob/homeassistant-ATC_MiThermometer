@@ -7,6 +7,9 @@ from homeassistant import config_entries
 from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers import entity_registry as er
+
+from tests.common import MockConfigEntry
 
 from custom_components.atc_mithermometer.config_flow import (
     ATCMiThermometerConfigFlow,
@@ -109,25 +112,24 @@ class TestConfigFlow:
         self, hass: HomeAssistant, mock_bluetooth_service_info, mock_setup_entry
     ):
         """Test device already configured."""
-        # Create existing entry
-        entry = MagicMock()
-        entry.unique_id = "AA:BB:CC:DD:EE:FF"
-        hass.config_entries._entries[DOMAIN] = [entry]
+        # Create existing entry using MockConfigEntry
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            unique_id="AA:BB:CC:DD:EE:FF",
+            data={
+                CONF_MAC_ADDRESS: "AA:BB:CC:DD:EE:FF",
+                CONF_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
+            },
+        )
+        entry.add_to_hass(hass)
 
         mock_devices = {
             "AA:BB:CC:DD:EE:FF": mock_bluetooth_service_info,
         }
 
-        with (
-            patch(
-                "custom_components.atc_mithermometer.config_flow.ATCMiThermometerConfigFlow._get_available_devices",
-                return_value=mock_devices,
-            ),
-            patch.object(
-                hass.config_entries.flow,
-                "_async_current_entries",
-                return_value=[entry],
-            ),
+        with patch(
+            "custom_components.atc_mithermometer.config_flow.ATCMiThermometerConfigFlow._get_available_devices",
+            return_value=mock_devices,
         ):
             result = await hass.config_entries.flow.async_init(
                 DOMAIN,
@@ -244,23 +246,25 @@ class TestConfigFlow:
         self, hass: HomeAssistant, mock_bluetooth_service_info, mock_setup_entry
     ):
         """Test bluetooth discovery when already configured."""
-        entry = MagicMock()
-        entry.unique_id = "AA:BB:CC:DD:EE:FF"
-        hass.config_entries._entries[DOMAIN] = [entry]
+        # Create existing entry using MockConfigEntry
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            unique_id="AA:BB:CC:DD:EE:FF",
+            data={
+                CONF_MAC_ADDRESS: "AA:BB:CC:DD:EE:FF",
+                CONF_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
+            },
+        )
+        entry.add_to_hass(hass)
 
-        with patch.object(
-            hass.config_entries.flow,
-            "_async_current_entries",
-            return_value=[entry],
-        ):
-            result = await hass.config_entries.flow.async_init(
-                DOMAIN,
-                context={"source": config_entries.SOURCE_BLUETOOTH},
-                data=mock_bluetooth_service_info,
-            )
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_BLUETOOTH},
+            data=mock_bluetooth_service_info,
+        )
 
-            assert result["type"] == FlowResultType.ABORT
-            assert result["reason"] == "already_configured"
+        assert result["type"] == FlowResultType.ABORT
+        assert result["reason"] == "already_configured"
 
     async def test_bluetooth_confirm_step(
         self, hass: HomeAssistant, mock_bluetooth_service_info, mock_setup_entry
@@ -391,11 +395,14 @@ class TestOptionsFlow:
 
     async def test_options_flow(self, hass: HomeAssistant):
         """Test options flow."""
-        entry = MagicMock()
-        entry.data = {
-            CONF_MAC_ADDRESS: "AA:BB:CC:DD:EE:FF",
-            CONF_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
-        }
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            unique_id="AA:BB:CC:DD:EE:FF",
+            data={
+                CONF_MAC_ADDRESS: "AA:BB:CC:DD:EE:FF",
+                CONF_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
+            },
+        )
 
         flow = ATCMiThermometerOptionsFlow(entry)
 
@@ -415,11 +422,14 @@ class TestOptionsFlow:
 
     async def test_options_flow_defaults_to_current_source(self, hass: HomeAssistant):
         """Test options flow shows current firmware source as default."""
-        entry = MagicMock()
-        entry.data = {
-            CONF_MAC_ADDRESS: "AA:BB:CC:DD:EE:FF",
-            CONF_FIRMWARE_SOURCE: FIRMWARE_SOURCE_ATC1441,
-        }
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            unique_id="AA:BB:CC:DD:EE:FF",
+            data={
+                CONF_MAC_ADDRESS: "AA:BB:CC:DD:EE:FF",
+                CONF_FIRMWARE_SOURCE: FIRMWARE_SOURCE_ATC1441,
+            },
+        )
 
         flow = ATCMiThermometerOptionsFlow(entry)
 

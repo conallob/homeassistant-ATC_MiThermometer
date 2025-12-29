@@ -70,3 +70,11 @@ def mock_bleak_client():
     client.is_connected = True
     client.write_gatt_char = MagicMock()
     return client
+
+
+@pytest.fixture(autouse=True)
+async def setup_bluetooth(hass):
+    """Set up bluetooth integration for tests."""
+    # Mock bluetooth integration setup to avoid dependency errors
+    hass.config.components.add("bluetooth")
+    yield
