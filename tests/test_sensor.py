@@ -57,12 +57,15 @@ async def test_async_setup_entry(
     hass: HomeAssistant, mock_config_entry, mock_firmware_manager, mock_bthome_device
 ):
     """Test setting up the sensor platform."""
-    with patch(
-        "custom_components.atc_mithermometer.sensor.FirmwareManager",
-        return_value=mock_firmware_manager,
-    ), patch(
-        "custom_components.atc_mithermometer.sensor.get_bthome_device_by_mac",
-        return_value=mock_bthome_device,
+    with (
+        patch(
+            "custom_components.atc_mithermometer.sensor.FirmwareManager",
+            return_value=mock_firmware_manager,
+        ),
+        patch(
+            "custom_components.atc_mithermometer.sensor.get_bthome_device_by_mac",
+            return_value=mock_bthome_device,
+        ),
     ):
         async_add_entities = MagicMock()
 
@@ -219,15 +222,11 @@ class TestATCFirmwareVersionSensor:
         with patch(
             "custom_components.atc_mithermometer.sensor.create_device_info"
         ) as mock_create_device_info:
-            sensor = ATCFirmwareVersionSensor(
-                coordinator, mock_config_entry, None
-            )
+            sensor = ATCFirmwareVersionSensor(coordinator, mock_config_entry, None)
 
             assert sensor.unique_id == "AA:BB:CC:DD:EE:FF_firmware_version"
             # Verify create_device_info was called with None for bthome_device
-            mock_create_device_info.assert_called_once_with(
-                "AA:BB:CC:DD:EE:FF", None
-            )
+            mock_create_device_info.assert_called_once_with("AA:BB:CC:DD:EE:FF", None)
 
     async def test_native_value_with_version(
         self, hass: HomeAssistant, mock_config_entry, mock_firmware_manager
@@ -244,9 +243,7 @@ class TestATCFirmwareVersionSensor:
             ATTR_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
         }
 
-        sensor = ATCFirmwareVersionSensor(
-            coordinator, mock_config_entry
-        )
+        sensor = ATCFirmwareVersionSensor(coordinator, mock_config_entry)
 
         assert sensor.native_value == "v1.0.0"
 
@@ -265,9 +262,7 @@ class TestATCFirmwareVersionSensor:
             ATTR_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
         }
 
-        sensor = ATCFirmwareVersionSensor(
-            coordinator, mock_config_entry
-        )
+        sensor = ATCFirmwareVersionSensor(coordinator, mock_config_entry)
 
         # Should return None when version is unavailable, letting HA show "Unavailable"
         assert sensor.native_value is None
@@ -287,9 +282,7 @@ class TestATCFirmwareVersionSensor:
             ATTR_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
         }
 
-        sensor = ATCFirmwareVersionSensor(
-            coordinator, mock_config_entry
-        )
+        sensor = ATCFirmwareVersionSensor(coordinator, mock_config_entry)
 
         # Empty string should also return None
         assert sensor.native_value is None
@@ -309,9 +302,7 @@ class TestATCFirmwareVersionSensor:
             ATTR_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
         }
 
-        sensor = ATCFirmwareVersionSensor(
-            coordinator, mock_config_entry
-        )
+        sensor = ATCFirmwareVersionSensor(coordinator, mock_config_entry)
 
         attrs = sensor.extra_state_attributes
 
@@ -335,9 +326,7 @@ class TestATCFirmwareVersionSensor:
             ATTR_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
         }
 
-        sensor = ATCFirmwareVersionSensor(
-            coordinator, mock_config_entry
-        )
+        sensor = ATCFirmwareVersionSensor(coordinator, mock_config_entry)
 
         # Initial value
         assert sensor.native_value == "v1.0.0"
@@ -364,9 +353,7 @@ class TestATCFirmwareVersionSensor:
         # Empty coordinator data
         coordinator.data = {}
 
-        sensor = ATCFirmwareVersionSensor(
-            coordinator, mock_config_entry
-        )
+        sensor = ATCFirmwareVersionSensor(coordinator, mock_config_entry)
 
         # Should handle missing keys gracefully by returning None
         assert sensor.native_value is None

@@ -32,6 +32,11 @@ FIRMWARE_SOURCES: Final = {
 SERVICE_UUID_ENVIRONMENTAL: Final = "0000181a-0000-1000-8000-00805f9b34fb"
 SERVICE_UUID_DEVICE_INFO: Final = "0000180a-0000-1000-8000-00805f9b34fb"
 
+# Device Information Service Characteristic UUIDs (standard BLE)
+CHAR_UUID_SOFTWARE_REVISION: Final = "00002a28-0000-1000-8000-00805f9b34fb"
+CHAR_UUID_HARDWARE_REVISION: Final = "00002a27-0000-1000-8000-00805f9b34fb"
+CHAR_UUID_FIRMWARE_REVISION: Final = "00002a26-0000-1000-8000-00805f9b34fb"
+
 # Characteristic UUIDs for OTA
 CHAR_UUID_OTA_CONTROL: Final = "00010203-0405-0607-0809-0a0b0c0d1912"
 CHAR_UUID_OTA_DATA: Final = "00010203-0405-0607-0809-0a0b0c0d1910"
@@ -67,6 +72,12 @@ ATC1441_DEVICE_TYPE: Final = 0x181A
 VERSION_BYTE_MAJOR: Final = 4  # Byte offset for major version number
 VERSION_BYTE_MINOR: Final = 5  # Byte offset for minor version number
 MIN_MANUFACTURER_DATA_LEN: Final = 6  # Minimum length for version detection
+# Common version string prefixes to strip (e.g., "V4.3" -> "4.3")
+VERSION_PREFIX_CHARS: Final = ("V", "v")
+# Version string validation pattern (semantic versioning: major.minor[.patch][.build])
+# Limits: 1-3 digits per component, max 4 components, max 20 chars total
+VERSION_VALIDATION_PATTERN: Final = r"^(\d{1,3}\.){1,3}\d{1,3}$"
+MAX_VERSION_LENGTH: Final = 20  # Maximum reasonable version string length
 
 # Attributes
 ATTR_CURRENT_VERSION: Final = "current_version"

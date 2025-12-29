@@ -23,7 +23,14 @@ from custom_components.atc_mithermometer.firmware import (
 @pytest.fixture
 def firmware_manager(hass: HomeAssistant):
     """Create a firmware manager instance."""
-    return FirmwareManager(hass, "AA:BB:CC:DD:EE:FF")
+    # Mock async_get_clientsession to avoid event loop issues in __init__
+    mock_session = MagicMock()
+    with patch(
+        "custom_components.atc_mithermometer.firmware.async_get_clientsession",
+        return_value=mock_session,
+    ):
+        manager = FirmwareManager(hass, "AA:BB:CC:DD:EE:FF")
+    return manager
 
 
 @pytest.fixture
@@ -79,7 +86,13 @@ class TestFirmwareManager:
 
     def test_firmware_manager_init(self, hass: HomeAssistant):
         """Test firmware manager initialization."""
-        manager = FirmwareManager(hass, "AA:BB:CC:DD:EE:FF")
+        # Mock async_get_clientsession to avoid event loop issues
+        mock_session = MagicMock()
+        with patch(
+            "custom_components.atc_mithermometer.firmware.async_get_clientsession",
+            return_value=mock_session,
+        ):
+            manager = FirmwareManager(hass, "AA:BB:CC:DD:EE:FF")
 
         assert manager.hass == hass
         assert manager.mac_address == "AA:BB:CC:DD:EE:FF"
@@ -262,7 +275,10 @@ class TestFirmwareManager:
             )
 
             assert result == firmware_data
-            mock_get.assert_called_once_with("https://example.com/firmware.bin")
+            mock_get.assert_called_once_with(
+                "https://example.com/firmware.bin",
+                timeout=aiohttp.ClientTimeout(total=60)
+            )
             mock_response.read.assert_called_once()
 
     async def test_download_firmware_http_error(self, firmware_manager):
@@ -282,7 +298,10 @@ class TestFirmwareManager:
             )
 
             assert result is None
-            mock_get.assert_called_once_with("https://example.com/firmware.bin")
+            mock_get.assert_called_once_with(
+                "https://example.com/firmware.bin",
+                timeout=aiohttp.ClientTimeout(total=60)
+            )
 
     async def test_download_firmware_too_small(self, firmware_manager):
         """Test firmware download with file too small."""
@@ -304,7 +323,10 @@ class TestFirmwareManager:
             )
 
             assert result is None
-            mock_get.assert_called_once_with("https://example.com/firmware.bin")
+            mock_get.assert_called_once_with(
+                "https://example.com/firmware.bin",
+                timeout=aiohttp.ClientTimeout(total=60)
+            )
             mock_response.read.assert_called_once()
 
     async def test_download_firmware_too_large(self, firmware_manager):
@@ -327,7 +349,10 @@ class TestFirmwareManager:
             )
 
             assert result is None
-            mock_get.assert_called_once_with("https://example.com/firmware.bin")
+            mock_get.assert_called_once_with(
+                "https://example.com/firmware.bin",
+                timeout=aiohttp.ClientTimeout(total=60)
+            )
             mock_response.read.assert_called_once()
 
     async def test_download_firmware_timeout(self, firmware_manager):
@@ -342,7 +367,10 @@ class TestFirmwareManager:
             )
 
             assert result is None
-            mock_get.assert_called_once_with("https://example.com/firmware.bin")
+            mock_get.assert_called_once_with(
+                "https://example.com/firmware.bin",
+                timeout=aiohttp.ClientTimeout(total=60)
+            )
 
     async def test_download_firmware_network_error(self, firmware_manager):
         """Test firmware download network error."""
@@ -356,7 +384,10 @@ class TestFirmwareManager:
             )
 
             assert result is None
-            mock_get.assert_called_once_with("https://example.com/firmware.bin")
+            mock_get.assert_called_once_with(
+                "https://example.com/firmware.bin",
+                timeout=aiohttp.ClientTimeout(total=60)
+            )
 
     async def test_flash_firmware_success(self, firmware_manager):
         """Test successful firmware flash."""
@@ -369,13 +400,16 @@ class TestFirmwareManager:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock()
 
-        with patch(
-            "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
-            return_value=mock_ble_device,
-        ) as mock_get_device, patch(
-            "custom_components.atc_mithermometer.firmware.BleakClient",
-            return_value=mock_client,
-        ) as mock_bleak:
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ) as mock_get_device,
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                return_value=mock_client,
+            ) as mock_bleak,
+        ):
             result = await firmware_manager.flash_firmware(firmware_data)
 
             assert result is True
@@ -399,12 +433,15 @@ class TestFirmwareManager:
         def progress_callback(current, total):
             progress_calls.append((current, total))
 
-        with patch(
-            "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
-            return_value=mock_ble_device,
-        ), patch(
-            "custom_components.atc_mithermometer.firmware.BleakClient",
-            return_value=mock_client,
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                return_value=mock_client,
+            ),
         ):
             result = await firmware_manager.flash_firmware(
                 firmware_data, progress_callback
@@ -436,15 +473,18 @@ class TestFirmwareManager:
         mock_client = AsyncMock(spec=BleakClient)
         mock_client.is_connected = False
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
+        mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch(
-            "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
-            return_value=mock_ble_device,
-        ) as mock_get_device, patch(
-            "custom_components.atc_mithermometer.firmware.BleakClient",
-            return_value=mock_client,
-        ) as mock_bleak:
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ) as mock_get_device,
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                return_value=mock_client,
+            ) as mock_bleak,
+        ):
             result = await firmware_manager.flash_firmware(firmware_data)
 
             assert result is False
@@ -457,13 +497,16 @@ class TestFirmwareManager:
 
         mock_ble_device = MagicMock()
 
-        with patch(
-            "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
-            return_value=mock_ble_device,
-        ) as mock_get_device, patch(
-            "custom_components.atc_mithermometer.firmware.BleakClient",
-            side_effect=BleakError("Connection failed"),
-        ) as mock_bleak:
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ) as mock_get_device,
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                side_effect=BleakError("Connection failed"),
+            ) as mock_bleak,
+        ):
             result = await firmware_manager.flash_firmware(firmware_data)
 
             assert result is False
@@ -476,13 +519,16 @@ class TestFirmwareManager:
 
         mock_ble_device = MagicMock()
 
-        with patch(
-            "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
-            return_value=mock_ble_device,
-        ) as mock_get_device, patch(
-            "custom_components.atc_mithermometer.firmware.BleakClient",
-            side_effect=asyncio.TimeoutError(),
-        ) as mock_bleak:
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ) as mock_get_device,
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                side_effect=asyncio.TimeoutError(),
+            ) as mock_bleak,
+        ):
             result = await firmware_manager.flash_firmware(firmware_data)
 
             assert result is False
@@ -493,17 +539,30 @@ class TestFirmwareManager:
         """Test getting current version from device advertisements."""
         mock_ble_device = MagicMock()
 
+        # Mock BLE client that fails to connect (triggers fallback to manufacturer data)
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = False
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock()
+
         mock_service_info = MagicMock()
         mock_service_info.manufacturer_data = {
             0x0001: bytes([0x00, 0x01, 0x02, 0x03, 0x01, 0x02])  # version 1.2
         }
 
-        with patch(
-            "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
-            return_value=mock_ble_device,
-        ), patch(
-            "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
-            return_value=mock_service_info,
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
+                return_value=mock_service_info,
+            ),
         ):
             version = await firmware_manager.get_current_version()
 
@@ -523,15 +582,28 @@ class TestFirmwareManager:
         """Test getting version when no manufacturer data."""
         mock_ble_device = MagicMock()
 
+        # Mock BLE client that fails to connect (triggers fallback to manufacturer data)
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = False
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock()
+
         mock_service_info = MagicMock()
         mock_service_info.manufacturer_data = {}
 
-        with patch(
-            "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
-            return_value=mock_ble_device,
-        ), patch(
-            "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
-            return_value=mock_service_info,
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
+                return_value=mock_service_info,
+            ),
         ):
             version = await firmware_manager.get_current_version()
 
@@ -541,15 +613,28 @@ class TestFirmwareManager:
         """Test getting version with insufficient data."""
         mock_ble_device = MagicMock()
 
+        # Mock BLE client that fails to connect (triggers fallback to manufacturer data)
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = False
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock()
+
         mock_service_info = MagicMock()
         mock_service_info.manufacturer_data = {0x0001: bytes([0x00, 0x01])}  # Too short
 
-        with patch(
-            "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
-            return_value=mock_ble_device,
-        ), patch(
-            "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
-            return_value=mock_service_info,
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
+                return_value=mock_service_info,
+            ),
         ):
             version = await firmware_manager.get_current_version()
 
@@ -564,3 +649,340 @@ class TestFirmwareManager:
             version = await firmware_manager.get_current_version()
 
             assert version is None
+
+    async def test_get_current_version_from_gatt_success(self, firmware_manager):
+        """Test getting version from GATT characteristic successfully."""
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = True
+        mock_client.read_gatt_char = AsyncMock(return_value=b"V4.3")
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock()
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                return_value=mock_client,
+            ),
+        ):
+            version = await firmware_manager.get_current_version()
+
+            assert version == "4.3"
+            mock_client.read_gatt_char.assert_called_once()
+
+    async def test_get_current_version_from_gatt_lowercase_prefix(
+        self, firmware_manager
+    ):
+        """Test getting version from GATT with lowercase 'v' prefix."""
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = True
+        mock_client.read_gatt_char = AsyncMock(return_value=b"v3.2.1")
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock()
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                return_value=mock_client,
+            ),
+        ):
+            version = await firmware_manager.get_current_version()
+
+            assert version == "3.2.1"
+
+    async def test_get_current_version_from_gatt_no_prefix(self, firmware_manager):
+        """Test getting version from GATT without version prefix."""
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = True
+        mock_client.read_gatt_char = AsyncMock(return_value=b"2.0")
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock()
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                return_value=mock_client,
+            ),
+        ):
+            version = await firmware_manager.get_current_version()
+
+            assert version == "2.0"
+
+    async def test_get_current_version_from_gatt_with_whitespace(
+        self, firmware_manager
+    ):
+        """Test getting version from GATT with surrounding whitespace."""
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = True
+        mock_client.read_gatt_char = AsyncMock(return_value=b"  V5.1  ")
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock()
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                return_value=mock_client,
+            ),
+        ):
+            version = await firmware_manager.get_current_version()
+
+            assert version == "5.1"
+
+    async def test_get_current_version_gatt_empty_after_prefix(self, firmware_manager):
+        """Test GATT version that becomes empty after prefix removal."""
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = True
+        # Only contains prefix, nothing after
+        mock_client.read_gatt_char = AsyncMock(return_value=b"V")
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock()
+
+        mock_service_info = MagicMock()
+        mock_service_info.manufacturer_data = {
+            0x0001: bytes([0x00, 0x01, 0x02, 0x03, 0x01, 0x02])  # version 1.2 fallback
+        }
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
+                return_value=mock_service_info,
+            ),
+        ):
+            version = await firmware_manager.get_current_version()
+
+            # Should fall back to manufacturer data
+            assert version == "1.2"
+
+    async def test_get_current_version_gatt_utf8_error(self, firmware_manager):
+        """Test GATT version with invalid UTF-8 bytes falls back to manufacturer data."""
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = True
+        # Invalid UTF-8 sequence that should trigger fallback
+        mock_client.read_gatt_char = AsyncMock(
+            return_value=b"V4.\xff\xfe3"  # Invalid UTF-8
+        )
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock()
+
+        # Mock manufacturer data for fallback
+        mock_service_info = MagicMock()
+        mock_service_info.manufacturer_data = {
+            0x0001: bytes([0x00, 0x01, 0x02, 0x03, 0x04, 0x05])  # version 4.5 fallback
+        }
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
+                return_value=mock_service_info,
+            ),
+        ):
+            version = await firmware_manager.get_current_version()
+
+            # Should fall back to manufacturer data when UTF-8 decode fails
+            assert version == "4.5"
+
+    async def test_get_current_version_gatt_timeout_fallback(self, firmware_manager):
+        """Test GATT timeout with fallback to manufacturer data."""
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = True
+        mock_client.read_gatt_char = AsyncMock(side_effect=asyncio.TimeoutError())
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock()
+
+        mock_service_info = MagicMock()
+        mock_service_info.manufacturer_data = {
+            0x0001: bytes([0x00, 0x01, 0x02, 0x03, 0x02, 0x05])  # version 2.5
+        }
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
+                return_value=mock_service_info,
+            ),
+        ):
+            version = await firmware_manager.get_current_version()
+
+            # Should fall back to manufacturer data
+            assert version == "2.5"
+
+    async def test_get_current_version_gatt_bleak_error_fallback(
+        self, firmware_manager
+    ):
+        """Test GATT BleakError with fallback to manufacturer data."""
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = True
+        mock_client.read_gatt_char = AsyncMock(
+            side_effect=BleakError("Characteristic not found")
+        )
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock()
+
+        mock_service_info = MagicMock()
+        mock_service_info.manufacturer_data = {
+            0x0001: bytes([0x00, 0x01, 0x02, 0x03, 0x03, 0x00])  # version 3.0
+        }
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
+                return_value=mock_service_info,
+            ),
+        ):
+            version = await firmware_manager.get_current_version()
+
+            # Should fall back to manufacturer data
+            assert version == "3.0"
+
+    async def test_get_current_version_gatt_connection_failed(self, firmware_manager):
+        """Test GATT when client connection fails, falls back to manufacturer data."""
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = False  # Connection failed
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        mock_service_info = MagicMock()
+        mock_service_info.manufacturer_data = {
+            0x0001: bytes([0x00, 0x01, 0x02, 0x03, 0x04, 0x01])  # version 4.1
+        }
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
+                return_value=mock_service_info,
+            ),
+        ):
+            version = await firmware_manager.get_current_version()
+
+            # Should fall back to manufacturer data when GATT connection fails
+            assert version == "4.1"
+
+    async def test_get_current_version_gatt_empty_response(self, firmware_manager):
+        """Test GATT with empty response."""
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = True
+        mock_client.read_gatt_char = AsyncMock(return_value=b"")
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock()
+
+        mock_service_info = MagicMock()
+        mock_service_info.manufacturer_data = {
+            0x0001: bytes([0x00, 0x01, 0x02, 0x03, 0x01, 0x05])  # version 1.5
+        }
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
+                return_value=mock_service_info,
+            ),
+        ):
+            version = await firmware_manager.get_current_version()
+
+            # Should fall back to manufacturer data
+            assert version == "1.5"
+
+    async def test_get_current_version_gatt_none_response(self, firmware_manager):
+        """Test GATT with None response falls back to manufacturer data."""
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = True
+        # Return None instead of bytes
+        mock_client.read_gatt_char = AsyncMock(return_value=None)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock()
+
+        mock_service_info = MagicMock()
+        mock_service_info.manufacturer_data = {
+            0x0001: bytes([0x00, 0x01, 0x02, 0x03, 0x02, 0x03])  # version 2.3
+        }
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
+                return_value=mock_service_info,
+            ),
+        ):
+            version = await firmware_manager.get_current_version()
+
+            # Should fall back to manufacturer data when GATT returns None
+            assert version == "2.3"

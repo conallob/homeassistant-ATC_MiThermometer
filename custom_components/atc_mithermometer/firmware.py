@@ -19,16 +19,20 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import (
     CHAR_UUID_OTA_CONTROL,
     CHAR_UUID_OTA_DATA,
+    CHAR_UUID_SOFTWARE_REVISION,
     CHUNK_SIZE,
     FIRMWARE_SOURCES,
     FLASH_TIMEOUT,
     MAX_FIRMWARE_SIZE,
+    MAX_VERSION_LENGTH,
     MIN_FIRMWARE_SIZE,
     MIN_MANUFACTURER_DATA_LEN,
     OTA_CHUNK_DELAY,
     OTA_COMMAND_DELAY,
     VERSION_BYTE_MAJOR,
     VERSION_BYTE_MINOR,
+    VERSION_PREFIX_CHARS,
+    VERSION_VALIDATION_PATTERN,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -463,7 +467,10 @@ class FirmwareManager:
             return match.group(1).lower(), "sha256"
 
         # Format: SHA256(<filename>)= <hash>
-        sha256_pattern2 = rf"SHA256\s*\(\s*{re.escape(firmware_filename)}\s*\)\s*=\s*([a-fA-F0-9]{{64}})"
+        sha256_pattern2 = (
+            rf"SHA256\s*\(\s*{re.escape(firmware_filename)}\s*\)\s*=\s*"
+            r"([a-fA-F0-9]{64})"
+        )
         match = re.search(sha256_pattern2, release_body, re.IGNORECASE)
         if match:
             return match.group(1).lower(), "sha256"
@@ -501,7 +508,8 @@ class FirmwareManager:
             _LOGGER.warning(
                 "No checksum provided for firmware validation. "
                 "Firmware integrity cannot be verified. "
-                "This is a security risk - firmware could be corrupted or tampered with."
+                "This is a security risk - firmware could be corrupted or "
+                "tampered with."
             )
             return True
 
@@ -511,8 +519,8 @@ class FirmwareManager:
         if checksum_type_lower in ("md5", "sha1"):
             _LOGGER.error(
                 "SECURITY: Rejecting firmware with %s checksum. "
-                "%s is cryptographically broken and cannot guarantee firmware integrity. "
-                "Only SHA256 and SHA512 are accepted.",
+                "%s is cryptographically broken and cannot guarantee "
+                "firmware integrity. Only SHA256 and SHA512 are accepted.",
                 checksum_type_lower.upper(),
                 checksum_type_lower.upper(),
             )
@@ -526,7 +534,8 @@ class FirmwareManager:
                 calculated = hashlib.sha512(firmware_data).hexdigest()
             else:
                 _LOGGER.error(
-                    "Unsupported checksum type: %s. Only SHA256 and SHA512 are supported.",
+                    "Unsupported checksum type: %s. "
+                    "Only SHA256 and SHA512 are supported.",
                     checksum_type,
                 )
                 return False
@@ -622,27 +631,29 @@ class FirmwareManager:
         return True
 
     async def get_current_version(self) -> str | None:
-        """Get current firmware version from device via BLE advertisements.
+        """Get current firmware version by reading Device Information Service.
 
-        The ATC_MiThermometer firmware includes version information in the
-        manufacturer-specific data of BLE advertisements. This method attempts
-        to extract the version by parsing the manufacturer data.
+        Connects to the device and reads the Software Revision String characteristic
+        from the standard BLE Device Information Service (0x180A), just like the
+        web flasher tool does.
 
         Version Detection Strategy:
-        1. First attempts to get the device from the BLE address
-        2. Reads the most recent BLE advertisement (service info)
-        3. Parses manufacturer data looking for version bytes
-        4. Version format: bytes 4-5 contain major.minor version (e.g., "4.5")
+        1. Connect to the device via BLE
+        2. Read Software Revision String characteristic (0x2A28)
+        3. Parse version string (e.g., "V4.3" -> "4.3")
+        4. Fallback to manufacturer data if GATT read fails
 
         Returns:
-            str: Version string (e.g., "4.5") if successfully detected
-            None: If device not available, no manufacturer data, or parsing fails
+            str: Version string (e.g., "4.3") if successfully detected
+            None: If device not available, connection fails, or reading fails
 
         Note:
-            This method does not connect to the device - it only reads
-            advertisement data, making it fast and battery-efficient.
-            The manufacturer data format is firmware-specific and may
-            vary between ATC_MiThermometer versions.
+            This method connects to the device to read GATT characteristics.
+            The coordinator calls this method every UPDATE_CHECK_INTERVAL (6 hours),
+            so connection overhead is minimal. GATT characteristic reading is more
+            reliable than parsing advertisement data, ensuring accurate version
+            detection even when manufacturer data format varies between firmware
+            versions.
         """
         try:
             ble_device = bluetooth.async_ble_device_from_address(
@@ -653,54 +664,146 @@ class FirmwareManager:
                 _LOGGER.debug("Device %s not available", self.mac_address)
                 return None
 
-            # Try to get version from advertisement data first
+            # Try to read version from Device Information Service
+            try:
+                async with BleakClient(ble_device, timeout=30) as client:
+                    if not client.is_connected:
+                        _LOGGER.debug(
+                            "Failed to connect to device %s. Falling back to "
+                            "manufacturer data.",
+                            self.mac_address,
+                        )
+                        # Don't return here - fall through to manufacturer data fallback
+                    else:
+                        # Read Software Revision String (0x2A28)
+                        software_revision = await client.read_gatt_char(
+                            CHAR_UUID_SOFTWARE_REVISION
+                        )
+
+                        # Check for None or empty response
+                        if software_revision is None or not software_revision:
+                            _LOGGER.debug(
+                                "Empty or None response from Software Revision for %s",
+                                self.mac_address,
+                            )
+                            # Continue to fallback
+                        else:
+                            try:
+                                # Decode bytes to string with strict UTF-8
+                                # validation. Invalid UTF-8 will raise
+                                # UnicodeDecodeError and trigger fallback
+                                version_str = software_revision.decode("utf-8").strip()
+
+                                # Check for empty string after decode
+                                if not version_str:
+                                    _LOGGER.debug(
+                                        "Empty version string after decode for %s",
+                                        self.mac_address,
+                                    )
+                                    # Continue to fallback
+                                else:
+                                    # Check for excessive length (potential
+                                    # attack or corruption)
+                                    if len(version_str) > MAX_VERSION_LENGTH:
+                                        _LOGGER.warning(
+                                            "Version string exceeds max length "
+                                            "(%d > %d) for %s, falling back to "
+                                            "manufacturer data",
+                                            len(version_str),
+                                            MAX_VERSION_LENGTH,
+                                            self.mac_address,
+                                        )
+                                        # Continue to fallback
+                                    else:
+                                        # Remove version prefix if present
+                                        # (e.g., "V4.3" -> "4.3")
+                                        # Check if first char is version prefix
+                                        if (
+                                            version_str
+                                            and version_str[0] in VERSION_PREFIX_CHARS
+                                        ):
+                                            version_str = version_str[1:]
+
+                                        # Validate version format with regex
+                                        if not re.match(
+                                            VERSION_VALIDATION_PATTERN,
+                                            version_str,
+                                        ):
+                                            _LOGGER.debug(
+                                                "Version string '%s' does not "
+                                                "match expected format for %s, "
+                                                "falling back to manufacturer "
+                                                "data",
+                                                version_str,
+                                                self.mac_address,
+                                            )
+                                            # Continue to fallback
+                                        else:
+                                            _LOGGER.info(
+                                                "Detected firmware version %s "
+                                                "from Device Information Service",
+                                                version_str,
+                                            )
+                                            return version_str
+
+                            except UnicodeDecodeError as err:
+                                _LOGGER.debug(
+                                    "Invalid UTF-8 in version string for %s: %s. "
+                                    "Falling back to manufacturer data.",
+                                    self.mac_address,
+                                    err,
+                                )
+                                # Continue to fallback
+
+            except (BleakError, TimeoutError) as err:
+                # Use DEBUG level for expected fallback scenarios
+                # (characteristic not found)
+                # Use WARNING level for unexpected errors
+                # (timeout, connection issues)
+                if isinstance(err, BleakError) and "not found" in str(err).lower():
+                    _LOGGER.debug(
+                        "Software Revision characteristic not found for %s. "
+                        "Falling back to manufacturer data parsing.",
+                        self.mac_address,
+                    )
+                else:
+                    _LOGGER.warning(
+                        "Could not read version from Device Information Service for "
+                        "%s: %s. Falling back to manufacturer data parsing.",
+                        self.mac_address,
+                        err,
+                    )
+                # Fall through to try manufacturer data
+
+            # Fallback: Try to parse version from manufacturer data
             service_info = bluetooth.async_last_service_info(
                 self.hass, self.mac_address, connectable=True
             )
 
             if service_info and service_info.manufacturer_data:
-                # Parse version from manufacturer data if present
-                # This is device-specific and may need adjustment
                 for _mfr_id, data in service_info.manufacturer_data.items():
                     try:
-                        # Validate data length before accessing version bytes
                         if len(data) < MIN_MANUFACTURER_DATA_LEN:
-                            _LOGGER.debug(
-                                "Manufacturer data too short (%d bytes, need %d) for version detection",
-                                len(data),
-                                MIN_MANUFACTURER_DATA_LEN,
-                            )
                             continue
 
-                        # Extract version from predefined byte positions
-                        # ATC_MiThermometer firmware stores version at bytes 4-5
                         major = data[VERSION_BYTE_MAJOR]
                         minor = data[VERSION_BYTE_MINOR]
 
-                        # Validate version numbers are reasonable (0-99 each)
                         if not (0 <= major <= 99 and 0 <= minor <= 99):
-                            _LOGGER.debug(
-                                "Version bytes out of range: %d.%d (expected 0-99)",
-                                major,
-                                minor,
-                            )
                             continue
 
                         version_str = f"{major}.{minor}"
                         _LOGGER.debug(
-                            "Detected version %s from advertisements", version_str
+                            "Detected version %s from manufacturer data (fallback)",
+                            version_str,
                         )
                         return version_str
-                    except (IndexError, KeyError, ValueError, TypeError) as err:
-                        # Firmware format may have changed or data is malformed
-                        _LOGGER.debug(
-                            "Could not parse version from manufacturer data: %s", err
-                        )
+                    except (IndexError, KeyError, ValueError, TypeError):
                         continue
 
-            # Fallback: try reading from device info service
-            # This would require connecting to the device
-            _LOGGER.debug("Could not determine version from advertisements")
+            _LOGGER.debug(
+                "Could not determine firmware version for %s", self.mac_address
+            )
             return None
 
         except (BleakError, HomeAssistantError) as err:

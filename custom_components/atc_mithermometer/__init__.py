@@ -6,7 +6,6 @@ import logging
 from typing import Any
 
 import voluptuous as vol
-from packaging import version
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, callback
@@ -14,6 +13,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.entity import DeviceInfo
+from packaging import version
 
 from .const import (
     ATC_NAME_PREFIXES,
@@ -239,8 +239,8 @@ async def _async_apply_firmware(hass: HomeAssistant, call: ServiceCall) -> None:
 
     if not release:
         raise HomeAssistantError(
-            f"Firmware version {desired_version} not found for source {firmware_source}. "
-            f"Please check the version number and try again."
+            f"Firmware version {desired_version} not found for source "
+            f"{firmware_source}. Please check the version number and try again."
         )
 
     _LOGGER.info(
@@ -263,7 +263,9 @@ async def _async_apply_firmware(hass: HomeAssistant, call: ServiceCall) -> None:
             # Log when we cross a new milestone
             if current_milestone > last_milestone["value"] and current_milestone <= 100:
                 last_milestone["value"] = current_milestone
-                _LOGGER.info("Flash progress: %d%% (%d/%d)", current_milestone, current, total)
+                _LOGGER.info(
+                    "Flash progress: %d%% (%d/%d)", current_milestone, current, total
+                )
 
     # Use shared firmware application logic
     await firmware_manager.apply_firmware_update(release, progress_callback)
@@ -277,9 +279,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Remove service if this is the last config entry for this integration
         # Check is done within the event loop so it's thread-safe
         # Also verify service exists before attempting removal
-        if (
-            not hass.config_entries.async_entries(DOMAIN)
-            and hass.services.has_service(DOMAIN, SERVICE_APPLY_FIRMWARE)
+        if not hass.config_entries.async_entries(DOMAIN) and hass.services.has_service(
+            DOMAIN, SERVICE_APPLY_FIRMWARE
         ):
             try:
                 hass.services.async_remove(DOMAIN, SERVICE_APPLY_FIRMWARE)

@@ -14,6 +14,7 @@ from homeassistant.components.update import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
@@ -136,7 +137,7 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
         coordinator: ATCUpdateCoordinator,
         entry: ConfigEntry,
         firmware_manager: FirmwareManager,
-        bthome_device=None,
+        bthome_device: DeviceEntry | None = None,
     ) -> None:
         """Initialize the update entity."""
         super().__init__(coordinator)
@@ -243,7 +244,8 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
                     # Validate progress values
                     if current > total:
                         _LOGGER.warning(
-                            "Invalid progress: current (%d) > total (%d), capping at 100%%",
+                            "Invalid progress: current (%d) > total (%d), "
+                            "capping at 100%%",
                             current,
                             total,
                         )
