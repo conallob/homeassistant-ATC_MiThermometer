@@ -689,9 +689,12 @@ class FirmwareManager:
                             # Continue to fallback
                         else:
                             try:
-                                # Decode bytes to string with strict UTF-8 validation
-                                # Invalid UTF-8 will raise UnicodeDecodeError and trigger fallback
-                                version_str = software_revision.decode("utf-8").strip()
+                                # Decode bytes to string with strict UTF-8
+                                # validation. Invalid UTF-8 will raise
+                                # UnicodeDecodeError and trigger fallback
+                                version_str = software_revision.decode(
+                                    "utf-8"
+                                ).strip()
 
                                 # Check for empty string after decode
                                 if not version_str:
@@ -701,35 +704,47 @@ class FirmwareManager:
                                     )
                                     # Continue to fallback
                                 else:
-                                    # Check for excessive length (potential attack or corruption)
+                                    # Check for excessive length (potential
+                                    # attack or corruption)
                                     if len(version_str) > MAX_VERSION_LENGTH:
                                         _LOGGER.warning(
-                                            "Version string exceeds max length (%d > %d) for %s, "
-                                            "falling back to manufacturer data",
+                                            "Version string exceeds max length "
+                                            "(%d > %d) for %s, falling back to "
+                                            "manufacturer data",
                                             len(version_str),
                                             MAX_VERSION_LENGTH,
                                             self.mac_address,
                                         )
                                         # Continue to fallback
                                     else:
-                                        # Remove version prefix if present (e.g., "V4.3" -> "4.3")
-                                        # Check if first character is a version prefix
-                                        if version_str and version_str[0] in VERSION_PREFIX_CHARS:
+                                        # Remove version prefix if present
+                                        # (e.g., "V4.3" -> "4.3")
+                                        # Check if first char is version prefix
+                                        if (
+                                            version_str
+                                            and version_str[0]
+                                            in VERSION_PREFIX_CHARS
+                                        ):
                                             version_str = version_str[1:]
 
                                         # Validate version format with regex
-                                        if not re.match(VERSION_VALIDATION_PATTERN, version_str):
+                                        if not re.match(
+                                            VERSION_VALIDATION_PATTERN,
+                                            version_str,
+                                        ):
                                             _LOGGER.debug(
-                                                "Version string '%s' does not match expected format "
-                                                "for %s, falling back to manufacturer data",
+                                                "Version string '%s' does not "
+                                                "match expected format for %s, "
+                                                "falling back to manufacturer "
+                                                "data",
                                                 version_str,
                                                 self.mac_address,
                                             )
                                             # Continue to fallback
                                         else:
                                             _LOGGER.info(
-                                                "Detected firmware version %s from Device "
-                                                "Information Service",
+                                                "Detected firmware version %s "
+                                                "from Device Information Service",
                                                 version_str,
                                             )
                                             return version_str
@@ -744,8 +759,10 @@ class FirmwareManager:
                                 # Continue to fallback
 
             except (BleakError, TimeoutError) as err:
-                # Use DEBUG level for expected fallback scenarios (characteristic not found)
-                # Use WARNING level for unexpected errors (timeout, connection issues)
+                # Use DEBUG level for expected fallback scenarios
+                # (characteristic not found)
+                # Use WARNING level for unexpected errors
+                # (timeout, connection issues)
                 if isinstance(err, BleakError) and "not found" in str(err).lower():
                     _LOGGER.debug(
                         "Software Revision characteristic not found for %s. "
