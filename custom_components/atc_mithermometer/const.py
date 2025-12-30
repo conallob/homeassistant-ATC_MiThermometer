@@ -45,6 +45,7 @@ CHAR_UUID_OTA_DATA: Final = "00010203-0405-0607-0809-0a0b0c0d1910"
 # Check for updates every 6 hours to avoid GitHub API rate limits
 # GitHub has a rate limit of 60 requests/hour for unauthenticated requests
 UPDATE_CHECK_INTERVAL: Final = timedelta(hours=6)
+GATT_CONNECTION_TIMEOUT: Final = 30  # Timeout for GATT characteristic reads
 FLASH_TIMEOUT: Final = 300  # 5 minutes timeout for flashing
 CHUNK_SIZE: Final = 244  # BLE MTU size for firmware chunks
 
@@ -76,6 +77,8 @@ MIN_MANUFACTURER_DATA_LEN: Final = 6  # Minimum length for version detection
 VERSION_PREFIX_CHARS: Final = ("V", "v")
 # Version string validation pattern (semantic versioning: major.minor[.patch][.build])
 # Limits: 1-3 digits per component, max 4 components, max 20 chars total
+# Note: Requires at least major.minor (e.g., "4.3") - single component versions
+# like "4" are rejected as they don't match ATC firmware versioning scheme
 VERSION_VALIDATION_PATTERN: Final = r"^(\d{1,3}\.){1,3}\d{1,3}$"
 MAX_VERSION_LENGTH: Final = 20  # Maximum reasonable version string length
 
