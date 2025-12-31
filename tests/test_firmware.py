@@ -986,3 +986,142 @@ class TestFirmwareManager:
 
             # Should fall back to manufacturer data when GATT returns None
             assert version == "2.3"
+
+    async def test_get_current_version_gatt_max_length_boundary(
+        self, firmware_manager
+    ):
+        """Test GATT version at MAX_VERSION_LENGTH boundary (20 chars)."""
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = True
+        # Exactly 20 characters: "123.456.789.0123456" (19 chars + "V" prefix = 20)
+        mock_client.read_gatt_char = AsyncMock(
+            return_value=b"123.456.789.0123456"
+        )
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                return_value=mock_client,
+            ),
+        ):
+            version = await firmware_manager.get_current_version()
+
+            # Should accept version at exact max length
+            assert version == "123.456.789.0123456"
+
+    async def test_get_current_version_gatt_exceeds_max_length(
+        self, firmware_manager
+    ):
+        """Test GATT version exceeding MAX_VERSION_LENGTH falls back."""
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = True
+        # 21 characters exceeds MAX_VERSION_LENGTH (20)
+        mock_client.read_gatt_char = AsyncMock(
+            return_value=b"123.456.789.01234567"
+        )
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        mock_service_info = MagicMock()
+        mock_service_info.manufacturer_data = {
+            0x0001: bytes([0x00, 0x01, 0x02, 0x03, 0x03, 0x04])  # version 3.4
+        }
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
+                return_value=mock_service_info,
+            ),
+        ):
+            version = await firmware_manager.get_current_version()
+
+            # Should fall back to manufacturer data when exceeding max length
+            assert version == "3.4"
+
+    async def test_get_current_version_gatt_invalid_after_prefix_removal(
+        self, firmware_manager
+    ):
+        """Test GATT version invalid after prefix removal falls back."""
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = True
+        # "Vabc" -> after removing "V" = "abc", which is invalid
+        mock_client.read_gatt_char = AsyncMock(return_value=b"Vabc")
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        mock_service_info = MagicMock()
+        mock_service_info.manufacturer_data = {
+            0x0001: bytes([0x00, 0x01, 0x02, 0x03, 0x05, 0x06])  # version 5.6
+        }
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
+                return_value=mock_service_info,
+            ),
+        ):
+            version = await firmware_manager.get_current_version()
+
+            # Should fall back to manufacturer data for invalid format
+            assert version == "5.6"
+
+    async def test_get_current_version_gatt_single_component_after_prefix(
+        self, firmware_manager
+    ):
+        """Test GATT version with single component after prefix falls back."""
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = True
+        # "V4" -> after removing "V" = "4", which doesn't match major.minor pattern
+        mock_client.read_gatt_char = AsyncMock(return_value=b"V4")
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        mock_service_info = MagicMock()
+        mock_service_info.manufacturer_data = {
+            0x0001: bytes([0x00, 0x01, 0x02, 0x03, 0x04, 0x00])  # version 4.0
+        }
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
+                return_value=mock_service_info,
+            ),
+        ):
+            version = await firmware_manager.get_current_version()
+
+            # Should fall back to manufacturer data for single-component version
+            assert version == "4.0"
