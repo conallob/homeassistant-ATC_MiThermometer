@@ -641,15 +641,11 @@ class FirmwareManager:
             Validated version string or None if reading/validation fails
         """
         if not client.is_connected:
-            _LOGGER.debug(
-                "Client not connected for %s", self.mac_address
-            )
+            _LOGGER.debug("Client not connected for %s", self.mac_address)
             return None
 
         # Read Software Revision String (0x2A28)
-        software_revision = await client.read_gatt_char(
-            CHAR_UUID_SOFTWARE_REVISION
-        )
+        software_revision = await client.read_gatt_char(CHAR_UUID_SOFTWARE_REVISION)
 
         # Check for None or empty response
         if not software_revision:
