@@ -1,5 +1,6 @@
 """Test the update platform."""
 
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
@@ -441,6 +442,87 @@ class TestATCMiThermometerUpdate:
 
         # Progress should be reset
         assert entity._install_progress == 0
+
+    async def test_async_install_warns_when_version_unconfirmed(
+        self, hass: HomeAssistant, mock_config_entry, mock_firmware_manager, caplog
+    ):
+        """Warn (but don't fail) if the version still doesn't match post-refresh.
+
+        The OTA characteristic has no notify/ACK, so a successful write is not
+        proof the device applied it. If the post-install coordinator refresh
+        still reports the old version, that should be surfaced as a warning
+        rather than silently reported as a clean success.
+        """
+
+        coordinator = ATCUpdateCoordinator(
+            hass,
+            mock_firmware_manager,
+            FIRMWARE_SOURCE_PVVX,
+            "AA:BB:CC:DD:EE:FF",
+        )
+        coordinator.data = {
+            ATTR_CURRENT_VERSION: "v1.0.0",
+            ATTR_LATEST_VERSION: "v1.2.3",
+            ATTR_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
+            "latest_release": FirmwareRelease(
+                version="v1.2.3",
+                download_url="https://example.com/firmware.bin",
+                release_url="https://example.com/release",
+            ),
+        }
+        # Simulate a refresh that doesn't change the reported version - e.g.
+        # the device hasn't finished rebooting yet, or rejected the update.
+        coordinator.async_request_refresh = AsyncMock()
+
+        entity = ATCMiThermometerUpdate(
+            coordinator, mock_config_entry, mock_firmware_manager
+        )
+        entity.hass = hass
+        entity.async_write_ha_state = MagicMock()
+
+        with caplog.at_level(logging.WARNING):
+            await entity.async_install(version="v1.2.3", backup=False)
+
+        assert "does not yet match the expected" in caplog.text
+
+    async def test_async_install_no_warning_when_version_confirmed(
+        self, hass: HomeAssistant, mock_config_entry, mock_firmware_manager, caplog
+    ):
+        """No warning when the refreshed version matches the target."""
+
+        coordinator = ATCUpdateCoordinator(
+            hass,
+            mock_firmware_manager,
+            FIRMWARE_SOURCE_PVVX,
+            "AA:BB:CC:DD:EE:FF",
+        )
+        coordinator.data = {
+            ATTR_CURRENT_VERSION: "v1.0.0",
+            ATTR_LATEST_VERSION: "v1.2.3",
+            ATTR_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
+            "latest_release": FirmwareRelease(
+                version="v1.2.3",
+                download_url="https://example.com/firmware.bin",
+                release_url="https://example.com/release",
+            ),
+        }
+
+        async def fake_refresh():
+            """Simulate the device reporting the new version after reboot."""
+            coordinator.data = {**coordinator.data, ATTR_CURRENT_VERSION: "v1.2.3"}
+
+        coordinator.async_request_refresh = AsyncMock(side_effect=fake_refresh)
+
+        entity = ATCMiThermometerUpdate(
+            coordinator, mock_config_entry, mock_firmware_manager
+        )
+        entity.hass = hass
+        entity.async_write_ha_state = MagicMock()
+
+        with caplog.at_level(logging.WARNING):
+            await entity.async_install(version="v1.2.3", backup=False)
+
+        assert "does not yet match the expected" not in caplog.text
 
     async def test_async_install_no_release(
         self, hass: HomeAssistant, mock_config_entry, mock_firmware_manager
