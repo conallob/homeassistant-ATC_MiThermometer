@@ -292,9 +292,20 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
             # transport error - it's not confirmation the device accepted and
             # applied them. Re-reading the version is the only way to check,
             # so surface a mismatch instead of silently reporting success.
-            if self.installed_version and not _versions_equal(
-                self.installed_version, latest_release.version
-            ):
+            if not self.installed_version:
+                # The most concerning outcome (bad framing, device didn't come
+                # back at all, etc.) is also the one with the least
+                # information - don't let it be the one case that stays
+                # silent just because there's no old version to compare against.
+                _LOGGER.warning(
+                    "Firmware data was written to %s without a transport error, "
+                    "but the device did not respond afterwards, so the update "
+                    "to %s could not be confirmed. It may still be rebooting - "
+                    "check again shortly.",
+                    self._mac_address,
+                    latest_release.version,
+                )
+            elif not _versions_equal(self.installed_version, latest_release.version):
                 _LOGGER.warning(
                     "Firmware data was written to %s without a transport error, "
                     "but the reported version (%s) does not yet match the "

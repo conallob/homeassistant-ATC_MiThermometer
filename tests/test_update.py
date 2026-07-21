@@ -583,6 +583,50 @@ class TestATCMiThermometerUpdate:
 
         assert "does not yet match the expected" not in caplog.text
 
+    async def test_async_install_warns_when_device_unreachable_after_flash(
+        self, hass: HomeAssistant, mock_config_entry, mock_firmware_manager, caplog
+    ):
+        """Warn when the device doesn't respond at all after flashing.
+
+        This is arguably the most concerning outcome (bad framing, the
+        device never coming back, etc.) - it must not be the one case that
+        stays silent just because there's no old version to compare
+        against.
+        """
+        coordinator = ATCUpdateCoordinator(
+            hass,
+            mock_firmware_manager,
+            FIRMWARE_SOURCE_PVVX,
+            "AA:BB:CC:DD:EE:FF",
+        )
+        coordinator.data = {
+            ATTR_CURRENT_VERSION: "v1.0.0",
+            ATTR_LATEST_VERSION: "v1.2.3",
+            ATTR_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
+            "latest_release": FirmwareRelease(
+                version="v1.2.3",
+                download_url="https://example.com/firmware.bin",
+                release_url="https://example.com/release",
+            ),
+        }
+
+        async def fake_refresh():
+            """Simulate the device staying unreachable after the flash."""
+            coordinator.data = {**coordinator.data, ATTR_CURRENT_VERSION: None}
+
+        coordinator.async_request_refresh = AsyncMock(side_effect=fake_refresh)
+
+        entity = ATCMiThermometerUpdate(
+            coordinator, mock_config_entry, mock_firmware_manager
+        )
+        entity.hass = hass
+        entity.async_write_ha_state = MagicMock()
+
+        with caplog.at_level(logging.WARNING):
+            await entity.async_install(version="v1.2.3", backup=False)
+
+        assert "did not respond afterwards" in caplog.text
+
     async def test_async_install_no_release(
         self, hass: HomeAssistant, mock_config_entry, mock_firmware_manager
     ):
