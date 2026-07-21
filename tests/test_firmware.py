@@ -743,8 +743,13 @@ class TestFirmwareManager:
         ):
             offset = sector_index * OTA_SECTOR_SIZE
             sector = firmware_data[offset : offset + OTA_SECTOR_SIZE]
-            expected_crc = _crc16_ccitt(sector)
+            # The final (partial) sector is padded to a full 4K with 0xff
+            # (erased-flash convention) before its CRC is taken - a no-op
+            # for the two full sectors here, but required for sector 2.
+            expected_crc = _crc16_ccitt(sector.ljust(OTA_SECTOR_SIZE, b"\xff"))
             assert int.from_bytes(trailer[-2:], "little") == expected_crc
+            if sector_index == 2:
+                assert len(sector) < OTA_SECTOR_SIZE  # actually exercises padding
 
     async def test_get_current_version_from_advertisements(self, firmware_manager):
         """Test getting current version from device advertisements."""
@@ -811,6 +816,53 @@ class TestFirmwareManager:
             with caplog.at_level(logging.WARNING):
                 await firmware_manager.get_current_version()
             assert "No connectable Bluetooth route" not in caplog.text
+
+    async def test_get_current_version_not_connectable_warns_again_after_recovery(
+        self, firmware_manager, caplog
+    ):
+        """A new connectivity regression should warn again, not stay silent.
+
+        If the device becomes connectable again in between failures (e.g. a
+        Bluetooth proxy flapping), the next "not connectable" occurrence is a
+        *new* regression and should be surfaced at warning level again rather
+        than staying suppressed at debug forever.
+        """
+        with patch(
+            "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+            return_value=None,
+        ):
+            await firmware_manager.get_current_version()
+        assert firmware_manager._connectable_warning_logged is True
+
+        # Device becomes connectable again (GATT read itself fails, but that's
+        # irrelevant here - what matters is ble_device was found this time).
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                side_effect=BleakError("simulated transient failure"),
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
+                return_value=None,
+            ),
+        ):
+            await firmware_manager.get_current_version()
+        assert firmware_manager._connectable_warning_logged is False
+
+        caplog.clear()
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=None,
+            ),
+            caplog.at_level(logging.WARNING),
+        ):
+            await firmware_manager.get_current_version()
+        assert "No connectable Bluetooth route" in caplog.text
 
     async def test_get_current_version_no_manufacturer_data(self, firmware_manager):
         """Test getting version when no manufacturer data."""

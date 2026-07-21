@@ -371,12 +371,21 @@ class FirmwareManager:
     ) -> int:
         """Send one 4K sector's data packets plus its CRC trailer packet."""
         if sector_index > 0xFEFF:
+            # Not reachable today: MAX_FIRMWARE_SIZE (512K) caps sector count
+            # at 128, far under this limit. Guards against a future increase
+            # to MAX_FIRMWARE_SIZE colliding with the 0xFF00-0xFFFF command
+            # range reserved for OTA_CMD_START/OTA_CMD_END.
             raise HomeAssistantError("Firmware too large for OTA sector indexing")
 
         for seq, chunk_offset in enumerate(
             range(0, len(sector), OTA_PACKET_PAYLOAD_SIZE)
         ):
             if seq >= OTA_TRAILER_SEQ:
+                # Not reachable today: a 4K sector needs at most 241 packets
+                # of OTA_PACKET_PAYLOAD_SIZE (17) bytes, far under 0xFF (255).
+                # Guards against OTA_SECTOR_SIZE or OTA_PACKET_PAYLOAD_SIZE
+                # ever changing such that a sector collides with
+                # OTA_TRAILER_SEQ, the sentinel that marks the trailer packet.
                 raise HomeAssistantError("Sector produced too many OTA packets")
 
             chunk = sector[chunk_offset : chunk_offset + OTA_PACKET_PAYLOAD_SIZE]
@@ -392,8 +401,14 @@ class FirmwareManager:
 
         # Sector trailer packet: zero-padded payload with the sector's CRC16
         # in the final 2 bytes, so the device can validate the sector before
-        # committing it to flash.
-        sector_crc = _crc16_ccitt(sector)
+        # committing it to flash. The final sector of an image whose size
+        # isn't a multiple of OTA_SECTOR_SIZE is shorter than 4096 bytes here;
+        # pad it to a full sector with 0xff (erased-flash convention) before
+        # computing the CRC, matching the padding already used for individual
+        # packet payloads (see .ljust(..., b"\xff") above) - the device's own
+        # per-sector CRC almost certainly covers the full physical 4K flash
+        # page, treating the unwritten tail as erased 0xff, not a short slice.
+        sector_crc = _crc16_ccitt(sector.ljust(OTA_SECTOR_SIZE, b"\xff"))
         trailer_payload = bytes(OTA_PACKET_PAYLOAD_SIZE - 2) + sector_crc.to_bytes(
             2, "little"
         )
@@ -849,6 +864,11 @@ class FirmwareManager:
                 )
                 self._connectable_warning_logged = True
                 return None
+
+            # Connectable again - reset so a *new* connectivity regression
+            # (e.g. the proxy flapping) is still surfaced at warning level
+            # rather than staying silent at debug forever.
+            self._connectable_warning_logged = False
 
             # Try to read version from Device Information Service
             try:
