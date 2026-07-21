@@ -17,10 +17,8 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
-    CHAR_UUID_OTA_CONTROL,
-    CHAR_UUID_OTA_DATA,
+    CHAR_UUID_OTA,
     CHAR_UUID_SOFTWARE_REVISION,
-    CHUNK_SIZE,
     FIRMWARE_SOURCES,
     FLASH_TIMEOUT,
     GATT_CONNECTION_TIMEOUT,
@@ -29,12 +27,41 @@ from .const import (
     MIN_FIRMWARE_SIZE,
     MIN_MANUFACTURER_DATA_LEN,
     OTA_CHUNK_DELAY,
+    OTA_CMD_END,
+    OTA_CMD_START,
     OTA_COMMAND_DELAY,
+    OTA_PACKET_PAYLOAD_SIZE,
+    OTA_SECTOR_SIZE,
+    OTA_TRAILER_SEQ,
+    OTA_TRANSFER_TIMEOUT,
     VERSION_BYTE_MAJOR,
     VERSION_BYTE_MINOR,
     VERSION_PREFIX_CHARS,
     VERSION_VALIDATION_PATTERN,
 )
+
+_CRC16_CCITT_POLY = 0x1021
+_CRC16_CCITT_INIT = 0xFFFF
+
+
+def _crc16_ccitt(data: bytes) -> int:
+    """Compute CRC16-CCITT (poly 0x1021, init 0xFFFF) over data.
+
+    The Telink OTA GATT service (ble_ll_ota.h) declares a crc16() helper
+    but its implementation is compiled into a closed-source vendor library,
+    so the exact algorithm can't be read from source. CRC16-CCITT is the
+    conventional choice used across Telink SDK OTA reference material.
+    """
+    crc = _CRC16_CCITT_INIT
+    for byte in data:
+        crc ^= byte << 8
+        for _ in range(8):
+            if crc & 0x8000:
+                crc = ((crc << 1) ^ _CRC16_CCITT_POLY) & 0xFFFF
+            else:
+                crc = (crc << 1) & 0xFFFF
+    return crc
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -65,6 +92,11 @@ class FirmwareManager:
         # Rate limit retry configuration
         self._max_retries = 3
         self._retry_delay_base = 2  # Base delay in seconds for exponential backoff
+        # Only warn once about a missing connectable BLE route; some users
+        # intentionally only ever see this device passively (e.g. via a
+        # BTHome-only Bluetooth proxy) and don't need a warning every
+        # UPDATE_CHECK_INTERVAL poll.
+        self._connectable_warning_logged = False
 
     async def _fetch_github_api(self, url: str) -> dict | None:
         """Fetch data from GitHub API with exponential backoff on rate limits.
@@ -242,7 +274,7 @@ class FirmwareManager:
         firmware_data: bytes,
         progress_callback: Callable[[int, int], None] | None = None,
     ) -> bool:
-        """Flash firmware to device via BLE OTA.
+        """Flash firmware to device via the Telink legacy BLE OTA protocol.
 
         Args:
             firmware_data: The firmware binary data
@@ -252,6 +284,16 @@ class FirmwareManager:
             True if successful, False otherwise
         """
         _LOGGER.info("Starting firmware flash for device %s", self.mac_address)
+
+        if not MIN_FIRMWARE_SIZE <= len(firmware_data) <= MAX_FIRMWARE_SIZE:
+            _LOGGER.error(
+                "Refusing to flash firmware of invalid size: %d bytes "
+                "(expected %d-%d)",
+                len(firmware_data),
+                MIN_FIRMWARE_SIZE,
+                MAX_FIRMWARE_SIZE,
+            )
+            return False
 
         try:
             # Get BLE device
@@ -269,28 +311,16 @@ class FirmwareManager:
 
                 _LOGGER.info("Connected to device %s", self.mac_address)
 
-                # Start OTA mode
-                await self._start_ota_mode(client)
+                await asyncio.wait_for(
+                    self._transfer_firmware(client, firmware_data, progress_callback),
+                    timeout=OTA_TRANSFER_TIMEOUT,
+                )
 
-                # Send firmware in chunks
-                total_chunks = (len(firmware_data) + CHUNK_SIZE - 1) // CHUNK_SIZE
-
-                for i in range(0, len(firmware_data), CHUNK_SIZE):
-                    chunk = firmware_data[i : i + CHUNK_SIZE]
-                    chunk_num = i // CHUNK_SIZE
-
-                    await client.write_gatt_char(CHAR_UUID_OTA_DATA, chunk)
-
-                    if progress_callback:
-                        progress_callback(chunk_num + 1, total_chunks)
-
-                    # Small delay to avoid overwhelming the device
-                    await asyncio.sleep(OTA_CHUNK_DELAY)
-
-                # Finalize OTA
-                await self._finalize_ota(client)
-
-                _LOGGER.info("Firmware flash completed successfully")
+                _LOGGER.info(
+                    "Firmware data transfer completed for %s; device will validate "
+                    "and reboot if the CRC checks pass",
+                    self.mac_address,
+                )
                 return True
 
         except BleakError as err:
@@ -303,29 +333,124 @@ class FirmwareManager:
             _LOGGER.error("Home Assistant error during firmware flash: %s", err)
             return False
 
-    async def _start_ota_mode(self, client: BleakClient) -> None:
-        """Start OTA mode on device."""
-        # Send OTA start command (device-specific implementation)
-        # This is a placeholder - actual command depends on ATC firmware
-        try:
-            # Command to enter OTA mode (example, may need adjustment)
-            await client.write_gatt_char(CHAR_UUID_OTA_CONTROL, b"\x01")
-            await asyncio.sleep(OTA_COMMAND_DELAY)
-            _LOGGER.debug("OTA mode started")
-        except (BleakError, TimeoutError) as err:
-            # These errors are expected if device doesn't support this command
-            _LOGGER.debug("OTA mode start command not supported or failed: %s", err)
+    async def _transfer_firmware(
+        self,
+        client: BleakClient,
+        firmware_data: bytes,
+        progress_callback: Callable[[int, int], None] | None,
+    ) -> None:
+        """Run the OTA start/sector/end sequence, bounded by OTA_TRANSFER_TIMEOUT."""
+        await self._send_ota_start(client, len(firmware_data))
 
-    async def _finalize_ota(self, client: BleakClient) -> None:
-        """Finalize OTA update."""
-        try:
-            # Send OTA complete command
-            await client.write_gatt_char(CHAR_UUID_OTA_CONTROL, b"\x02")
-            await asyncio.sleep(OTA_COMMAND_DELAY)
-            _LOGGER.debug("OTA finalized")
-        except (BleakError, TimeoutError) as err:
-            # These errors are expected if device doesn't support this command
-            _LOGGER.debug("OTA finalize command not supported or failed: %s", err)
+        total_bytes = len(firmware_data)
+        bytes_sent = 0
+
+        for sector_index, sector_offset in enumerate(
+            range(0, total_bytes, OTA_SECTOR_SIZE)
+        ):
+            sector = firmware_data[sector_offset : sector_offset + OTA_SECTOR_SIZE]
+            bytes_sent = await self._send_ota_sector(
+                client,
+                sector_index,
+                sector,
+                bytes_sent,
+                total_bytes,
+                progress_callback,
+            )
+
+        await self._send_ota_end(client)
+
+    async def _send_ota_sector(
+        self,
+        client: BleakClient,
+        sector_index: int,
+        sector: bytes,
+        bytes_sent: int,
+        total_bytes: int,
+        progress_callback: Callable[[int, int], None] | None,
+    ) -> int:
+        """Send one 4K sector's data packets plus its CRC trailer packet."""
+        if sector_index > 0xFEFF:
+            # Not reachable today: MAX_FIRMWARE_SIZE (512K) caps sector count
+            # at 128, far under this limit. Guards against a future increase
+            # to MAX_FIRMWARE_SIZE colliding with the 0xFF00-0xFFFF command
+            # range reserved for OTA_CMD_START/OTA_CMD_END.
+            raise HomeAssistantError("Firmware too large for OTA sector indexing")
+
+        for seq, chunk_offset in enumerate(
+            range(0, len(sector), OTA_PACKET_PAYLOAD_SIZE)
+        ):
+            if seq >= OTA_TRAILER_SEQ:
+                # Not reachable today: a 4K sector needs at most 241 packets
+                # of OTA_PACKET_PAYLOAD_SIZE (17) bytes, far under 0xFF (255).
+                # Guards against OTA_SECTOR_SIZE or OTA_PACKET_PAYLOAD_SIZE
+                # ever changing such that a sector collides with
+                # OTA_TRAILER_SEQ, the sentinel that marks the trailer packet.
+                raise HomeAssistantError("Sector produced too many OTA packets")
+
+            chunk = sector[chunk_offset : chunk_offset + OTA_PACKET_PAYLOAD_SIZE]
+            payload = chunk.ljust(OTA_PACKET_PAYLOAD_SIZE, b"\xff")
+            packet = sector_index.to_bytes(2, "little") + bytes([seq]) + payload
+            await client.write_gatt_char(CHAR_UUID_OTA, packet, response=False)
+
+            bytes_sent += len(chunk)
+            if progress_callback:
+                progress_callback(bytes_sent, total_bytes)
+
+            await asyncio.sleep(OTA_CHUNK_DELAY)
+
+        # Sector trailer packet: zero-padded payload with the sector's CRC16
+        # in the final 2 bytes, so the device can validate the sector before
+        # committing it to flash. The final sector of an image whose size
+        # isn't a multiple of OTA_SECTOR_SIZE is shorter than 4096 bytes here;
+        # pad it to a full sector with 0xff (erased-flash convention) before
+        # computing the CRC, matching the padding already used for individual
+        # packet payloads (see .ljust(..., b"\xff") above) - the device's own
+        # per-sector CRC almost certainly covers the full physical 4K flash
+        # page, treating the unwritten tail as erased 0xff, not a short slice.
+        sector_crc = _crc16_ccitt(sector.ljust(OTA_SECTOR_SIZE, b"\xff"))
+        trailer_payload = bytes(OTA_PACKET_PAYLOAD_SIZE - 2) + sector_crc.to_bytes(
+            2, "little"
+        )
+        trailer_packet = (
+            sector_index.to_bytes(2, "little")
+            + bytes([OTA_TRAILER_SEQ])
+            + trailer_payload
+        )
+        await client.write_gatt_char(CHAR_UUID_OTA, trailer_packet, response=False)
+        await asyncio.sleep(OTA_CHUNK_DELAY)
+
+        return bytes_sent
+
+    async def _send_ota_start(self, client: BleakClient, firmware_size: int) -> None:
+        """Send the OTA start command with the total firmware size."""
+        payload = firmware_size.to_bytes(4, "little").ljust(16, b"\x00")
+        packet = self._build_ota_command(OTA_CMD_START, payload)
+        await client.write_gatt_char(CHAR_UUID_OTA, packet, response=False)
+        await asyncio.sleep(OTA_COMMAND_DELAY)
+        _LOGGER.debug("OTA start sent (firmware size %d bytes)", firmware_size)
+
+    async def _send_ota_end(self, client: BleakClient) -> None:
+        """Send the OTA end command to finalize the update."""
+        packet = self._build_ota_command(OTA_CMD_END, bytes(16))
+        await client.write_gatt_char(CHAR_UUID_OTA, packet, response=False)
+        await asyncio.sleep(OTA_COMMAND_DELAY)
+        _LOGGER.debug("OTA end sent")
+
+    @staticmethod
+    def _build_ota_command(command_id: int, payload: bytes) -> bytes:
+        """Build a 20-byte OTA command packet: id + 16-byte payload + CRC16.
+
+        Command packets and sector data packets share the same 2-byte
+        leading field (command_id here, sector_index in _send_ota_sector),
+        which is why sector_index is kept out of the reserved 0xFF00-0xFFFF
+        range. How the device itself tells the two packet kinds apart
+        (this leading field, packet length, or separate state) isn't
+        confirmed here - it's inferred from ext_ota.h's command IDs, not
+        verified against real hardware.
+        """
+        body = command_id.to_bytes(2, "little") + payload
+        return body + _crc16_ccitt(body).to_bytes(2, "little")
 
     async def get_release_by_version(
         self, firmware_source: str, version: str
@@ -734,8 +859,25 @@ class FirmwareManager:
             )
 
             if not ble_device:
-                _LOGGER.debug("Device %s not available", self.mac_address)
+                log = (
+                    _LOGGER.warning
+                    if not self._connectable_warning_logged
+                    else _LOGGER.debug
+                )
+                log(
+                    "No connectable Bluetooth route to %s. The device may only be "
+                    "visible via a passive/non-connectable Bluetooth proxy or "
+                    "adapter - firmware version detection and OTA updates require "
+                    "an active (connectable) Bluetooth connection to the device.",
+                    self.mac_address,
+                )
+                self._connectable_warning_logged = True
                 return None
+
+            # Connectable again - reset so a *new* connectivity regression
+            # (e.g. the proxy flapping) is still surfaced at warning level
+            # rather than staying silent at debug forever.
+            self._connectable_warning_logged = False
 
             # Try to read version from Device Information Service
             try:

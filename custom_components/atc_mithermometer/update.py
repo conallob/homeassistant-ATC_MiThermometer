@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -22,7 +23,7 @@ from homeassistant.helpers.update_coordinator import (
     UpdateFailed,
 )
 
-from . import create_device_info, get_bthome_device_by_mac
+from . import _versions_equal, create_device_info, get_bthome_device_by_mac
 from .const import (
     ATTR_CURRENT_VERSION,
     ATTR_FIRMWARE_SOURCE,
@@ -30,6 +31,7 @@ from .const import (
     CONF_FIRMWARE_SOURCE,
     CONF_MAC_ADDRESS,
     FIRMWARE_SOURCES,
+    POST_FLASH_REBOOT_DELAY,
     PROGRESS_COMPLETE,
     PROGRESS_DOWNLOAD_COMPLETE,
     PROGRESS_DOWNLOAD_START,
@@ -277,8 +279,31 @@ class ATCMiThermometerUpdate(CoordinatorEntity, UpdateEntity):
             self._install_progress = PROGRESS_COMPLETE
             self.async_write_ha_state()
 
-            # Wait a bit for device to reboot, then refresh
+            # Wait for the device to reboot before refreshing - the OTA end
+            # command triggers an almost-immediate reboot, so reading right
+            # away would likely either find the device briefly unreachable
+            # (silently skipping the check below) or still running the old
+            # firmware for a moment (a false "not confirmed" warning).
+            await asyncio.sleep(POST_FLASH_REBOOT_DELAY)
             await self.coordinator.async_request_refresh()
+
+            # The OTA characteristic has no notify/ACK, so apply_firmware_update
+            # returning True only means the bytes were written without a
+            # transport error - it's not confirmation the device accepted and
+            # applied them. Re-reading the version is the only way to check,
+            # so surface a mismatch instead of silently reporting success.
+            if self.installed_version and not _versions_equal(
+                self.installed_version, latest_release.version
+            ):
+                _LOGGER.warning(
+                    "Firmware data was written to %s without a transport error, "
+                    "but the reported version (%s) does not yet match the "
+                    "expected %s. The device may still be rebooting, or the "
+                    "update may not have been accepted - check again shortly.",
+                    self._mac_address,
+                    self.installed_version,
+                    latest_release.version,
+                )
 
         except HomeAssistantError:
             # Re-raise our own errors without wrapping

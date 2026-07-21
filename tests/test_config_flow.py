@@ -286,15 +286,13 @@ class TestConfigFlow:
     async def test_get_available_devices_from_scanner(
         self, hass: HomeAssistant, mock_bluetooth_service_info
     ):
-        """Test getting available devices from bluetooth scanner."""
-        mock_scanner = MagicMock()
-        mock_scanner.discovered_devices = [mock_bluetooth_service_info]
-
+        """Test getting available devices from discovered Bluetooth advertisements."""
         with (
             patch(
-                "custom_components.atc_mithermometer.config_flow.bluetooth.async_scanner_by_source",
-                return_value=mock_scanner,
-            ),
+                "custom_components.atc_mithermometer.config_flow.bluetooth."
+                "async_discovered_service_info",
+                return_value=[mock_bluetooth_service_info],
+            ) as mock_discovered,
             patch(
                 "custom_components.atc_mithermometer.config_flow.get_atc_devices_from_bthome",
                 return_value=[],
@@ -307,18 +305,19 @@ class TestConfigFlow:
 
             assert "AA:BB:CC:DD:EE:FF" in devices
             assert devices["AA:BB:CC:DD:EE:FF"] == mock_bluetooth_service_info
+            # connectable=False so devices only heard passively (e.g. by a
+            # non-active Bluetooth proxy) still show up for selection.
+            mock_discovered.assert_called_once_with(hass, connectable=False)
 
     async def test_get_available_devices_excludes_configured(
         self, hass: HomeAssistant, mock_bluetooth_service_info
     ):
         """Test get available devices excludes already configured."""
-        mock_scanner = MagicMock()
-        mock_scanner.discovered_devices = [mock_bluetooth_service_info]
-
         with (
             patch(
-                "custom_components.atc_mithermometer.config_flow.bluetooth.async_scanner_by_source",
-                return_value=mock_scanner,
+                "custom_components.atc_mithermometer.config_flow.bluetooth."
+                "async_discovered_service_info",
+                return_value=[mock_bluetooth_service_info],
             ),
             patch(
                 "custom_components.atc_mithermometer.config_flow.get_atc_devices_from_bthome",
@@ -343,8 +342,9 @@ class TestConfigFlow:
 
         with (
             patch(
-                "custom_components.atc_mithermometer.config_flow.bluetooth.async_scanner_by_source",
-                return_value=None,
+                "custom_components.atc_mithermometer.config_flow.bluetooth."
+                "async_discovered_service_info",
+                return_value=[],
             ),
             patch(
                 "custom_components.atc_mithermometer.config_flow.get_atc_devices_from_bthome",
@@ -372,8 +372,9 @@ class TestConfigFlow:
         """Test get available devices handles BTHome errors gracefully."""
         with (
             patch(
-                "custom_components.atc_mithermometer.config_flow.bluetooth.async_scanner_by_source",
-                return_value=None,
+                "custom_components.atc_mithermometer.config_flow.bluetooth."
+                "async_discovered_service_info",
+                return_value=[],
             ),
             patch(
                 "custom_components.atc_mithermometer.config_flow.get_atc_devices_from_bthome",
