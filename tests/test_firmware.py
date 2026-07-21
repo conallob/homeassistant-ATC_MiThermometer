@@ -17,7 +17,28 @@ from custom_components.atc_mithermometer.const import (
 from custom_components.atc_mithermometer.firmware import (
     FirmwareManager,
     FirmwareRelease,
+    _crc16_ccitt,
 )
+
+
+class TestCrc16Ccitt:
+    """Test the CRC16-CCITT helper used to frame OTA packets."""
+
+    def test_empty_input_is_init_value(self):
+        """CRC of no data is just the initial register value."""
+        assert _crc16_ccitt(b"") == 0xFFFF
+
+    def test_known_vector(self):
+        """The string b'123456789' is the standard CRC16-CCITT test vector."""
+        assert _crc16_ccitt(b"123456789") == 0x29B1
+
+    def test_single_bit_change_changes_crc(self):
+        """A single changed byte must produce a different CRC."""
+        assert _crc16_ccitt(b"\x00" * 16) != _crc16_ccitt(b"\x00" * 15 + b"\x01")
+
+    def test_result_fits_in_16_bits(self):
+        """CRC must always be a valid u16."""
+        assert 0 <= _crc16_ccitt(bytes(range(256))) <= 0xFFFF
 
 
 @pytest.fixture
@@ -535,6 +556,100 @@ class TestFirmwareManager:
             mock_get_device.assert_called_once()
             mock_bleak.assert_called_once()
 
+    async def test_flash_firmware_uses_single_ota_characteristic(
+        self, firmware_manager
+    ):
+        """All OTA writes must target the single real OTA characteristic.
+
+        The GATT attribute table only exposes one characteristic for OTA
+        (UUID 00010203-0405-0607-0809-0a0b0c0d2b12, "TELINK_SPP_DATA_OTA" in
+        pvvx/ATC_MiThermometer's src/app_att.c). Writing to any other UUID
+        (as the previous implementation did) fails on real hardware because
+        no such characteristic exists.
+        """
+        firmware_data = b"x" * 100
+
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = True
+        mock_client.write_gatt_char = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock()
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                return_value=mock_client,
+            ),
+        ):
+            result = await firmware_manager.flash_firmware(firmware_data)
+
+        assert result is True
+        uuids_written = {
+            call.args[0] for call in mock_client.write_gatt_char.call_args_list
+        }
+        assert uuids_written == {"00010203-0405-0607-0809-0a0b0c0d2b12"}
+        # Every write must be write-without-response, matching the
+        # characteristic's CHAR_PROP_WRITE_WITHOUT_RSP-only declaration.
+        assert all(
+            call.kwargs.get("response") is False
+            for call in mock_client.write_gatt_char.call_args_list
+        )
+
+    async def test_flash_firmware_packet_framing(self, firmware_manager):
+        """Verify start/data/trailer/end packets follow the documented framing."""
+        firmware_data = b"\x42" * 10  # smaller than one sector
+
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = True
+        mock_client.write_gatt_char = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock()
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                return_value=mock_client,
+            ),
+        ):
+            result = await firmware_manager.flash_firmware(firmware_data)
+
+        assert result is True
+        packets = [
+            call.args[1] for call in mock_client.write_gatt_char.call_args_list
+        ]
+        # start command, one data packet, one trailer packet, end command
+        assert len(packets) == 4
+
+        start_packet = packets[0]
+        assert len(start_packet) == 20
+        assert int.from_bytes(start_packet[0:2], "little") == 0xFF01
+        assert int.from_bytes(start_packet[2:6], "little") == len(firmware_data)
+
+        data_packet = packets[1]
+        assert len(data_packet) == 20
+        assert int.from_bytes(data_packet[0:2], "little") == 0  # sector 0
+        assert data_packet[2] == 0  # first packet_seq of the sector
+        assert data_packet[3 : 3 + len(firmware_data)] == firmware_data
+
+        trailer_packet = packets[2]
+        assert len(trailer_packet) == 20
+        assert int.from_bytes(trailer_packet[0:2], "little") == 0  # sector 0
+        assert trailer_packet[2] == 0xFF  # trailer sentinel
+
+        end_packet = packets[3]
+        assert len(end_packet) == 20
+        assert int.from_bytes(end_packet[0:2], "little") == 0xFF02
+
     async def test_get_current_version_from_advertisements(self, firmware_manager):
         """Test getting current version from device advertisements."""
         mock_ble_device = MagicMock()
@@ -990,7 +1105,14 @@ class TestFirmwareManager:
     async def test_get_current_version_gatt_max_length_boundary(
         self, firmware_manager
     ):
-        """Test GATT version at MAX_VERSION_LENGTH boundary (20 chars)."""
+        """Test GATT version at the MAX_VERSION_LENGTH boundary (20 chars).
+
+        The longest string VERSION_VALIDATION_PATTERN can ever accept is 16
+        chars ("V" + "123.456.789.012"), well under MAX_VERSION_LENGTH (20).
+        So a string that is exactly 20 chars is always rejected - by the
+        length check if it happens to be even longer, or by the pattern
+        otherwise - and detection falls back to manufacturer data.
+        """
         mock_ble_device = MagicMock()
         mock_client = AsyncMock(spec=BleakClient)
         mock_client.is_connected = True
@@ -1001,6 +1123,11 @@ class TestFirmwareManager:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
+        mock_service_info = MagicMock()
+        mock_service_info.manufacturer_data = {
+            0x0001: bytes([0x00, 0x01, 0x02, 0x03, 0x02, 0x03])  # version 2.3
+        }
+
         with (
             patch(
                 "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
@@ -1010,11 +1137,15 @@ class TestFirmwareManager:
                 "custom_components.atc_mithermometer.firmware.BleakClient",
                 return_value=mock_client,
             ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
+                return_value=mock_service_info,
+            ),
         ):
             version = await firmware_manager.get_current_version()
 
-            # Should accept version at exact max length
-            assert version == "123.456.789.0123456"
+            # Not a valid version format, so GATT rejects it and we fall back
+            assert version == "2.3"
 
     async def test_get_current_version_gatt_exceeds_max_length(
         self, firmware_manager

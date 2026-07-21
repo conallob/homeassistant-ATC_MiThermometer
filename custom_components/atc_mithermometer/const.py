@@ -37,9 +37,31 @@ CHAR_UUID_SOFTWARE_REVISION: Final = "00002a28-0000-1000-8000-00805f9b34fb"
 CHAR_UUID_HARDWARE_REVISION: Final = "00002a27-0000-1000-8000-00805f9b34fb"
 CHAR_UUID_FIRMWARE_REVISION: Final = "00002a26-0000-1000-8000-00805f9b34fb"
 
-# Characteristic UUIDs for OTA
-CHAR_UUID_OTA_CONTROL: Final = "00010203-0405-0607-0809-0a0b0c0d1912"
-CHAR_UUID_OTA_DATA: Final = "00010203-0405-0607-0809-0a0b0c0d1910"
+# Characteristic UUID for the Telink legacy OTA service (pvvx/atc1441 firmware).
+# This is the *only* GATT characteristic used for OTA - the firmware's
+# GATT attribute table (src/app_att.c in pvvx/ATC_MiThermometer) declares a
+# single characteristic with UUID bytes TELINK_SPP_DATA_OTA
+# ({0x12,0x2B,0x0d,...,0x00}, i.e. 00010203-0405-0607-0809-0a0b0c0d2b12).
+# It carries CHAR_PROP_READ | CHAR_PROP_WRITE_WITHOUT_RSP only - there is no
+# notify property, so the device gives no in-band ACK/NAK; success can only
+# be confirmed after the fact by re-reading the firmware version.
+CHAR_UUID_OTA: Final = "00010203-0405-0607-0809-0a0b0c0d2b12"
+
+# Telink legacy OTA command IDs (src/ext_ota.h / SDK ble_ll_ota.h), written as
+# the first 2 bytes (little-endian) of a 20-byte command packet:
+# [u16 command_id][16 bytes payload][u16 crc16 over the first 18 bytes].
+# For OTA_CMD_START, payload bytes 0-3 hold the firmware size (u32 LE).
+OTA_CMD_START: Final = 0xFF01
+OTA_CMD_END: Final = 0xFF02
+
+# Firmware data packets are sent per 4K flash sector: [u16 sector_index]
+# [u8 packet_seq][17 bytes payload]. packet_seq counts up from 0 for each
+# 17-byte chunk of real data within the sector; the sentinel value
+# OTA_TRAILER_SEQ marks the sector's trailer packet, whose payload is
+# zero-padded except for a trailing u16 CRC16 of the whole 4K sector.
+OTA_SECTOR_SIZE: Final = 4096
+OTA_PACKET_PAYLOAD_SIZE: Final = 17
+OTA_TRAILER_SEQ: Final = 0xFF
 
 # Update settings
 # Check for updates every 6 hours to avoid GitHub API rate limits
@@ -47,7 +69,6 @@ CHAR_UUID_OTA_DATA: Final = "00010203-0405-0607-0809-0a0b0c0d1910"
 UPDATE_CHECK_INTERVAL: Final = timedelta(hours=6)
 GATT_CONNECTION_TIMEOUT: Final = 30  # Timeout for GATT characteristic reads
 FLASH_TIMEOUT: Final = 300  # 5 minutes timeout for flashing
-CHUNK_SIZE: Final = 244  # BLE MTU size for firmware chunks
 
 # Firmware validation
 MIN_FIRMWARE_SIZE: Final = 1024  # Minimum valid firmware size (1KB)

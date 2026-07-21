@@ -156,18 +156,20 @@ class ATCMiThermometerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Get available ATC MiThermometer devices."""
         discovered_devices = {}
 
-        # Get devices from Bluetooth scanner
-        scanner = bluetooth.async_scanner_by_source(self.hass, bluetooth.MONOTONIC_TIME)
-        if scanner:
-            for service_info in scanner.discovered_devices:
-                if service_info.address in current_addresses:
-                    continue
+        # Get all currently known Bluetooth advertisements. connectable=False
+        # so devices that are only heard passively (e.g. by a Bluetooth proxy
+        # not configured for active connections) still show up for selection.
+        for service_info in bluetooth.async_discovered_service_info(
+            self.hass, connectable=False
+        ):
+            if service_info.address in current_addresses:
+                continue
 
-                if is_atc_mithermometer(
-                    service_info.name,
-                    [str(uuid) for uuid in service_info.service_uuids],
-                ):
-                    discovered_devices[service_info.address] = service_info
+            if is_atc_mithermometer(
+                service_info.name,
+                [str(uuid) for uuid in service_info.service_uuids],
+            ):
+                discovered_devices[service_info.address] = service_info
 
         # Also check BTHome integration devices
         try:
