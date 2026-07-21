@@ -1,6 +1,7 @@
 """Test the firmware module."""
 
 import asyncio
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
@@ -13,6 +14,7 @@ from custom_components.atc_mithermometer.const import (
     FIRMWARE_SOURCE_PVVX,
     MAX_FIRMWARE_SIZE,
     MIN_FIRMWARE_SIZE,
+    OTA_SECTOR_SIZE,
 )
 from custom_components.atc_mithermometer.firmware import (
     FirmwareManager,
@@ -412,7 +414,7 @@ class TestFirmwareManager:
 
     async def test_flash_firmware_success(self, firmware_manager):
         """Test successful firmware flash."""
-        firmware_data = b"x" * 1000
+        firmware_data = b"x" * MIN_FIRMWARE_SIZE
 
         mock_ble_device = MagicMock()
         mock_client = AsyncMock(spec=BleakClient)
@@ -440,7 +442,7 @@ class TestFirmwareManager:
 
     async def test_flash_firmware_with_progress_callback(self, firmware_manager):
         """Test firmware flash with progress callback."""
-        firmware_data = b"x" * 1000
+        firmware_data = b"x" * MIN_FIRMWARE_SIZE
 
         mock_ble_device = MagicMock()
         mock_client = AsyncMock(spec=BleakClient)
@@ -475,7 +477,7 @@ class TestFirmwareManager:
 
     async def test_flash_firmware_device_not_found(self, firmware_manager):
         """Test firmware flash when device not found."""
-        firmware_data = b"x" * 1000
+        firmware_data = b"x" * MIN_FIRMWARE_SIZE
 
         with patch(
             "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
@@ -488,7 +490,7 @@ class TestFirmwareManager:
 
     async def test_flash_firmware_connection_failed(self, firmware_manager):
         """Test firmware flash when connection fails."""
-        firmware_data = b"x" * 1000
+        firmware_data = b"x" * MIN_FIRMWARE_SIZE
 
         mock_ble_device = MagicMock()
         mock_client = AsyncMock(spec=BleakClient)
@@ -514,7 +516,7 @@ class TestFirmwareManager:
 
     async def test_flash_firmware_ble_error(self, firmware_manager):
         """Test firmware flash with BLE error."""
-        firmware_data = b"x" * 1000
+        firmware_data = b"x" * MIN_FIRMWARE_SIZE
 
         mock_ble_device = MagicMock()
 
@@ -536,7 +538,7 @@ class TestFirmwareManager:
 
     async def test_flash_firmware_timeout(self, firmware_manager):
         """Test firmware flash timeout."""
-        firmware_data = b"x" * 1000
+        firmware_data = b"x" * MIN_FIRMWARE_SIZE
 
         mock_ble_device = MagicMock()
 
@@ -556,6 +558,36 @@ class TestFirmwareManager:
             mock_get_device.assert_called_once()
             mock_bleak.assert_called_once()
 
+    async def test_flash_firmware_rejects_undersized_data(self, firmware_manager):
+        """flash_firmware must validate size itself, not just download_firmware.
+
+        It's a public method, so a caller that bypasses download_firmware
+        (or passes bad data directly) shouldn't be able to trigger an OTA
+        start/end command sequence for empty/tiny data.
+        """
+        firmware_data = b"x" * (MIN_FIRMWARE_SIZE - 1)
+
+        with patch(
+            "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+        ) as mock_get_device:
+            result = await firmware_manager.flash_firmware(firmware_data)
+
+        assert result is False
+        # Should fail fast, before ever looking up the BLE device.
+        mock_get_device.assert_not_called()
+
+    async def test_flash_firmware_rejects_oversized_data(self, firmware_manager):
+        """flash_firmware must reject data larger than MAX_FIRMWARE_SIZE."""
+        firmware_data = b"x" * (MAX_FIRMWARE_SIZE + 1)
+
+        with patch(
+            "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+        ) as mock_get_device:
+            result = await firmware_manager.flash_firmware(firmware_data)
+
+        assert result is False
+        mock_get_device.assert_not_called()
+
     async def test_flash_firmware_uses_single_ota_characteristic(
         self, firmware_manager
     ):
@@ -567,7 +599,7 @@ class TestFirmwareManager:
         (as the previous implementation did) fails on real hardware because
         no such characteristic exists.
         """
-        firmware_data = b"x" * 100
+        firmware_data = b"x" * MIN_FIRMWARE_SIZE
 
         mock_ble_device = MagicMock()
         mock_client = AsyncMock(spec=BleakClient)
@@ -584,6 +616,10 @@ class TestFirmwareManager:
             patch(
                 "custom_components.atc_mithermometer.firmware.BleakClient",
                 return_value=mock_client,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.asyncio.sleep",
+                new=AsyncMock(),
             ),
         ):
             result = await firmware_manager.flash_firmware(firmware_data)
@@ -602,7 +638,9 @@ class TestFirmwareManager:
 
     async def test_flash_firmware_packet_framing(self, firmware_manager):
         """Verify start/data/trailer/end packets follow the documented framing."""
-        firmware_data = b"\x42" * 10  # smaller than one sector
+        # MIN_FIRMWARE_SIZE (1024 bytes) - smaller than one 4K sector, but
+        # still large enough to need multiple 17-byte data packets.
+        firmware_data = bytes([0x42]) * MIN_FIRMWARE_SIZE
 
         mock_ble_device = MagicMock()
         mock_client = AsyncMock(spec=BleakClient)
@@ -620,35 +658,93 @@ class TestFirmwareManager:
                 "custom_components.atc_mithermometer.firmware.BleakClient",
                 return_value=mock_client,
             ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.asyncio.sleep",
+                new=AsyncMock(),
+            ),
         ):
             result = await firmware_manager.flash_firmware(firmware_data)
 
         assert result is True
-        packets = [
-            call.args[1] for call in mock_client.write_gatt_char.call_args_list
-        ]
-        # start command, one data packet, one trailer packet, end command
-        assert len(packets) == 4
+        packets = [call.args[1] for call in mock_client.write_gatt_char.call_args_list]
+        # start command + N data packets + one trailer packet + end command
+        assert len(packets) > 3
 
         start_packet = packets[0]
         assert len(start_packet) == 20
         assert int.from_bytes(start_packet[0:2], "little") == 0xFF01
         assert int.from_bytes(start_packet[2:6], "little") == len(firmware_data)
 
-        data_packet = packets[1]
-        assert len(data_packet) == 20
-        assert int.from_bytes(data_packet[0:2], "little") == 0  # sector 0
-        assert data_packet[2] == 0  # first packet_seq of the sector
-        assert data_packet[3 : 3 + len(firmware_data)] == firmware_data
+        end_packet = packets[-1]
+        assert len(end_packet) == 20
+        assert int.from_bytes(end_packet[0:2], "little") == 0xFF02
 
-        trailer_packet = packets[2]
+        trailer_packet = packets[-2]
         assert len(trailer_packet) == 20
         assert int.from_bytes(trailer_packet[0:2], "little") == 0  # sector 0
         assert trailer_packet[2] == 0xFF  # trailer sentinel
 
-        end_packet = packets[3]
-        assert len(end_packet) == 20
-        assert int.from_bytes(end_packet[0:2], "little") == 0xFF02
+        data_packets = packets[1:-2]
+        for seq, packet in enumerate(data_packets):
+            assert len(packet) == 20
+            assert int.from_bytes(packet[0:2], "little") == 0  # sector 0
+            assert packet[2] == seq  # packet_seq increments from 0
+
+        reconstructed = b"".join(p[3:20] for p in data_packets)[: len(firmware_data)]
+        assert reconstructed == firmware_data
+
+    async def test_flash_firmware_multi_sector(self, firmware_manager):
+        """Verify sector_index increments and each sector gets its own trailer.
+
+        Regression test for sector-boundary handling: previous tests only
+        covered firmware that fit in a single 4K sector.
+        """
+        # Just over 2 sectors: sector 0 and 1 full (4096 bytes each), sector 2
+        # partial (10 bytes).
+        firmware_data = bytes(range(256)) * 32 + b"\x99" * 10
+        assert len(firmware_data) == 2 * OTA_SECTOR_SIZE + 10
+
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = True
+        mock_client.write_gatt_char = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock()
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.BleakClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.asyncio.sleep",
+                new=AsyncMock(),
+            ),
+        ):
+            result = await firmware_manager.flash_firmware(firmware_data)
+
+        assert result is True
+        packets = [call.args[1] for call in mock_client.write_gatt_char.call_args_list]
+
+        # Trailer packets are the ones with packet_seq == 0xFF.
+        trailer_packets = [p for p in packets[1:-1] if p[2] == 0xFF]
+        assert len(trailer_packets) == 3  # one per sector, including the partial one
+        trailer_sector_indices = [
+            int.from_bytes(p[0:2], "little") for p in trailer_packets
+        ]
+        assert trailer_sector_indices == [0, 1, 2]
+
+        for sector_index, trailer in zip(
+            trailer_sector_indices, trailer_packets, strict=True
+        ):
+            offset = sector_index * OTA_SECTOR_SIZE
+            sector = firmware_data[offset : offset + OTA_SECTOR_SIZE]
+            expected_crc = _crc16_ccitt(sector)
+            assert int.from_bytes(trailer[-2:], "little") == expected_crc
 
     async def test_get_current_version_from_advertisements(self, firmware_manager):
         """Test getting current version from device advertisements."""
@@ -692,6 +788,29 @@ class TestFirmwareManager:
             version = await firmware_manager.get_current_version()
 
             assert version is None
+
+    async def test_get_current_version_not_connectable_warns_once(
+        self, firmware_manager, caplog
+    ):
+        """The "no connectable route" message should only warn once.
+
+        Repeated failures (e.g. a coordinator polling every 6 hours for a
+        device that's only ever seen passively) should drop to debug after
+        the first warning, so steady-state logs for a deliberately
+        non-connectable device don't accumulate warnings forever.
+        """
+        with patch(
+            "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+            return_value=None,
+        ):
+            with caplog.at_level(logging.WARNING):
+                await firmware_manager.get_current_version()
+            assert "No connectable Bluetooth route" in caplog.text
+
+            caplog.clear()
+            with caplog.at_level(logging.WARNING):
+                await firmware_manager.get_current_version()
+            assert "No connectable Bluetooth route" not in caplog.text
 
     async def test_get_current_version_no_manufacturer_data(self, firmware_manager):
         """Test getting version when no manufacturer data."""

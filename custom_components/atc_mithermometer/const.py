@@ -68,7 +68,14 @@ OTA_TRAILER_SEQ: Final = 0xFF
 # GitHub has a rate limit of 60 requests/hour for unauthenticated requests
 UPDATE_CHECK_INTERVAL: Final = timedelta(hours=6)
 GATT_CONNECTION_TIMEOUT: Final = 30  # Timeout for GATT characteristic reads
-FLASH_TIMEOUT: Final = 300  # 5 minutes timeout for flashing
+FLASH_TIMEOUT: Final = 300  # Timeout for the initial BLE connection when flashing
+# Ceiling for the whole OTA data-transfer phase (start command through end
+# command), separate from FLASH_TIMEOUT above which only bounds connecting.
+# At OTA_PACKET_PAYLOAD_SIZE=17 bytes/packet and OTA_CHUNK_DELAY=0.02s, even
+# the largest allowed image (MAX_FIRMWARE_SIZE, 512K) needs roughly
+# 512*1024/17*0.02 =~ 620s of scheduled inter-packet delay; this gives that
+# generous headroom rather than hanging forever if the connection stalls.
+OTA_TRANSFER_TIMEOUT: Final = 900  # 15 minutes
 
 # Firmware validation
 MIN_FIRMWARE_SIZE: Final = 1024  # Minimum valid firmware size (1KB)

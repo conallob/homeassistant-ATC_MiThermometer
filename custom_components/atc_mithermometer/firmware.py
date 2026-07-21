@@ -33,6 +33,7 @@ from .const import (
     OTA_PACKET_PAYLOAD_SIZE,
     OTA_SECTOR_SIZE,
     OTA_TRAILER_SEQ,
+    OTA_TRANSFER_TIMEOUT,
     VERSION_BYTE_MAJOR,
     VERSION_BYTE_MINOR,
     VERSION_PREFIX_CHARS,
@@ -91,6 +92,11 @@ class FirmwareManager:
         # Rate limit retry configuration
         self._max_retries = 3
         self._retry_delay_base = 2  # Base delay in seconds for exponential backoff
+        # Only warn once about a missing connectable BLE route; some users
+        # intentionally only ever see this device passively (e.g. via a
+        # BTHome-only Bluetooth proxy) and don't need a warning every
+        # UPDATE_CHECK_INTERVAL poll.
+        self._connectable_warning_logged = False
 
     async def _fetch_github_api(self, url: str) -> dict | None:
         """Fetch data from GitHub API with exponential backoff on rate limits.
@@ -279,6 +285,16 @@ class FirmwareManager:
         """
         _LOGGER.info("Starting firmware flash for device %s", self.mac_address)
 
+        if not MIN_FIRMWARE_SIZE <= len(firmware_data) <= MAX_FIRMWARE_SIZE:
+            _LOGGER.error(
+                "Refusing to flash firmware of invalid size: %d bytes "
+                "(expected %d-%d)",
+                len(firmware_data),
+                MIN_FIRMWARE_SIZE,
+                MAX_FIRMWARE_SIZE,
+            )
+            return False
+
         try:
             # Get BLE device
             ble_device = bluetooth.async_ble_device_from_address(
@@ -295,27 +311,10 @@ class FirmwareManager:
 
                 _LOGGER.info("Connected to device %s", self.mac_address)
 
-                await self._send_ota_start(client, len(firmware_data))
-
-                total_bytes = len(firmware_data)
-                bytes_sent = 0
-
-                for sector_index, sector_offset in enumerate(
-                    range(0, total_bytes, OTA_SECTOR_SIZE)
-                ):
-                    sector = firmware_data[
-                        sector_offset : sector_offset + OTA_SECTOR_SIZE
-                    ]
-                    bytes_sent = await self._send_ota_sector(
-                        client,
-                        sector_index,
-                        sector,
-                        bytes_sent,
-                        total_bytes,
-                        progress_callback,
-                    )
-
-                await self._send_ota_end(client)
+                await asyncio.wait_for(
+                    self._transfer_firmware(client, firmware_data, progress_callback),
+                    timeout=OTA_TRANSFER_TIMEOUT,
+                )
 
                 _LOGGER.info(
                     "Firmware data transfer completed for %s; device will validate "
@@ -333,6 +332,33 @@ class FirmwareManager:
         except HomeAssistantError as err:
             _LOGGER.error("Home Assistant error during firmware flash: %s", err)
             return False
+
+    async def _transfer_firmware(
+        self,
+        client: BleakClient,
+        firmware_data: bytes,
+        progress_callback: Callable[[int, int], None] | None,
+    ) -> None:
+        """Run the OTA start/sector/end sequence, bounded by OTA_TRANSFER_TIMEOUT."""
+        await self._send_ota_start(client, len(firmware_data))
+
+        total_bytes = len(firmware_data)
+        bytes_sent = 0
+
+        for sector_index, sector_offset in enumerate(
+            range(0, total_bytes, OTA_SECTOR_SIZE)
+        ):
+            sector = firmware_data[sector_offset : sector_offset + OTA_SECTOR_SIZE]
+            bytes_sent = await self._send_ota_sector(
+                client,
+                sector_index,
+                sector,
+                bytes_sent,
+                total_bytes,
+                progress_callback,
+            )
+
+        await self._send_ota_end(client)
 
     async def _send_ota_sector(
         self,
@@ -809,13 +835,19 @@ class FirmwareManager:
             )
 
             if not ble_device:
-                _LOGGER.warning(
+                log = (
+                    _LOGGER.warning
+                    if not self._connectable_warning_logged
+                    else _LOGGER.debug
+                )
+                log(
                     "No connectable Bluetooth route to %s. The device may only be "
                     "visible via a passive/non-connectable Bluetooth proxy or "
                     "adapter - firmware version detection and OTA updates require "
                     "an active (connectable) Bluetooth connection to the device.",
                     self.mac_address,
                 )
+                self._connectable_warning_logged = True
                 return None
 
             # Try to read version from Device Information Service
