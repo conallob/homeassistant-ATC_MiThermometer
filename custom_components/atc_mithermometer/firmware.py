@@ -439,7 +439,16 @@ class FirmwareManager:
 
     @staticmethod
     def _build_ota_command(command_id: int, payload: bytes) -> bytes:
-        """Build a 20-byte OTA command packet: id + 16-byte payload + CRC16."""
+        """Build a 20-byte OTA command packet: id + 16-byte payload + CRC16.
+
+        Command packets and sector data packets share the same 2-byte
+        leading field (command_id here, sector_index in _send_ota_sector),
+        which is why sector_index is kept out of the reserved 0xFF00-0xFFFF
+        range. How the device itself tells the two packet kinds apart
+        (this leading field, packet length, or separate state) isn't
+        confirmed here - it's inferred from ext_ota.h's command IDs, not
+        verified against real hardware.
+        """
         body = command_id.to_bytes(2, "little") + payload
         return body + _crc16_ccitt(body).to_bytes(2, "little")
 

@@ -17,6 +17,7 @@ from custom_components.atc_mithermometer.const import (
     CONF_FIRMWARE_SOURCE,
     CONF_MAC_ADDRESS,
     FIRMWARE_SOURCE_PVVX,
+    POST_FLASH_REBOOT_DELAY,
     PROGRESS_DOWNLOAD_COMPLETE,
     PROGRESS_DOWNLOAD_START,
 )
@@ -180,6 +181,15 @@ class TestATCUpdateCoordinator:
 
 class TestATCMiThermometerUpdate:
     """Test ATCMiThermometerUpdate entity."""
+
+    @pytest.fixture(autouse=True)
+    def _no_reboot_delay(self):
+        """Skip the real POST_FLASH_REBOOT_DELAY sleep in async_install tests."""
+        with patch(
+            "custom_components.atc_mithermometer.update.asyncio.sleep",
+            new=AsyncMock(),
+        ):
+            yield
 
     async def test_entity_init_with_bthome_device(
         self,
@@ -442,6 +452,55 @@ class TestATCMiThermometerUpdate:
 
         # Progress should be reset
         assert entity._install_progress == 0
+
+    async def test_async_install_waits_for_reboot_before_refresh(
+        self, hass: HomeAssistant, mock_config_entry, mock_firmware_manager
+    ):
+        """The reboot delay must happen before the refresh, not after.
+
+        Regression test: refreshing immediately after the OTA end command
+        races the device's reboot, making the version-confirmation check
+        either silently skip (device briefly unreachable) or produce a false
+        warning (still reads the pre-update version for a moment).
+        """
+        coordinator = ATCUpdateCoordinator(
+            hass,
+            mock_firmware_manager,
+            FIRMWARE_SOURCE_PVVX,
+            "AA:BB:CC:DD:EE:FF",
+        )
+        coordinator.data = {
+            ATTR_CURRENT_VERSION: "v1.2.3",
+            ATTR_LATEST_VERSION: "v1.2.3",
+            ATTR_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
+            "latest_release": FirmwareRelease(
+                version="v1.2.3",
+                download_url="https://example.com/firmware.bin",
+                release_url="https://example.com/release",
+            ),
+        }
+        coordinator.async_request_refresh = AsyncMock()
+
+        entity = ATCMiThermometerUpdate(
+            coordinator, mock_config_entry, mock_firmware_manager
+        )
+        entity.hass = hass
+        entity.async_write_ha_state = MagicMock()
+
+        call_order = []
+        sleep_mock = AsyncMock(side_effect=lambda *_: call_order.append("sleep"))
+        coordinator.async_request_refresh.side_effect = (
+            lambda: call_order.append("refresh") or None
+        )
+
+        with patch(
+            "custom_components.atc_mithermometer.update.asyncio.sleep",
+            new=sleep_mock,
+        ):
+            await entity.async_install(version="v1.2.3", backup=False)
+
+        sleep_mock.assert_called_once_with(POST_FLASH_REBOOT_DELAY)
+        assert call_order == ["sleep", "refresh"]
 
     async def test_async_install_warns_when_version_unconfirmed(
         self, hass: HomeAssistant, mock_config_entry, mock_firmware_manager, caplog

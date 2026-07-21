@@ -77,6 +77,15 @@ FLASH_TIMEOUT: Final = 300  # Timeout for the initial BLE connection when flashi
 # generous headroom rather than hanging forever if the connection stalls.
 OTA_TRANSFER_TIMEOUT: Final = 900  # 15 minutes
 
+# The Telink OTA end command triggers an (almost) immediate device reboot.
+# Refreshing the version right away races that reboot: the device may
+# briefly be unreachable (giving a None read that skips the post-flash
+# version check entirely) or still answer with the pre-update version for a
+# moment before it actually restarts (giving a false "not confirmed"
+# warning even on a successful flash). This delay is a heuristic, not a
+# guarantee - it's not derived from real-device timing.
+POST_FLASH_REBOOT_DELAY: Final = 5  # seconds to wait before re-checking version
+
 # Firmware validation
 MIN_FIRMWARE_SIZE: Final = 1024  # Minimum valid firmware size (1KB)
 MAX_FIRMWARE_SIZE: Final = 512 * 1024  # Maximum valid firmware size (512KB)
