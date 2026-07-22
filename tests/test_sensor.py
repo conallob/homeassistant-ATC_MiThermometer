@@ -76,6 +76,18 @@ async def test_async_setup_entry(
         assert len(entities) == 1
         assert isinstance(entities[0], ATCFirmwareVersionSensor)
 
+        # Regression test: update_before_add=True would trigger a second,
+        # fully redundant refresh via CoordinatorEntity.async_update()
+        # synchronously during setup (async_config_entry_first_refresh()
+        # above already populated the coordinator's data). For a
+        # slow-to-connect device that redundant refresh can run long enough
+        # to get the whole config entry's setup cancelled by Home Assistant,
+        # not just fail one reading - so async_add_entities must be called
+        # with entities only, no truthy second positional/update_before_add
+        # argument.
+        assert async_add_entities.call_args[0][1:] in ((), (False,))
+        assert async_add_entities.call_args.kwargs.get("update_before_add") is not True
+
 
 class TestATCFirmwareCoordinator:
     """Test ATCFirmwareCoordinator."""

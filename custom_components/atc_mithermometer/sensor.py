@@ -54,13 +54,17 @@ async def async_setup_entry(
         mac_address,
     )
 
-    # Fetch initial data
+    # Fetch initial data. update_before_add is deliberately omitted below:
+    # this refresh already populated coordinator.data, and CoordinatorEntity
+    # .async_update() would otherwise trigger a second, fully redundant
+    # refresh synchronously during setup. get_current_version() can now take
+    # a couple of minutes in the worst case (bleak_retry_connector retries
+    # BLE connections with backoff), and that second refresh blocking
+    # platform setup was enough to blow past Home Assistant's setup timeout
+    # and get the whole config entry's setup cancelled outright.
     await coordinator.async_config_entry_first_refresh()
 
-    async_add_entities(
-        [ATCFirmwareVersionSensor(coordinator, entry, bthome_device)],
-        True,
-    )
+    async_add_entities([ATCFirmwareVersionSensor(coordinator, entry, bthome_device)])
 
 
 class ATCFirmwareCoordinator(DataUpdateCoordinator):

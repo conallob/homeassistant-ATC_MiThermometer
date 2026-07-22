@@ -10,6 +10,7 @@ from bleak import BleakClient, BleakError
 from homeassistant.core import HomeAssistant
 
 from custom_components.atc_mithermometer.const import (
+    CONNECT_TIMEOUT,
     FIRMWARE_SOURCE_ATC1441,
     FIRMWARE_SOURCE_PVVX,
     MAX_FIRMWARE_SIZE,
@@ -507,6 +508,60 @@ class TestFirmwareManager:
 
         assert result is True
         mock_client.disconnect.assert_called_once()
+
+    async def test_flash_firmware_connect_is_bounded_by_connect_timeout(
+        self, firmware_manager
+    ):
+        """establish_connection() must be wrapped with CONNECT_TIMEOUT.
+
+        Regression test: bleak_retry_connector's own retry accounting
+        tracks timeouts and "transient" errors as separate budgets, so a
+        marginal device can end up retrying far past its documented
+        default of 4 attempts - observed in production running 9-10
+        retries, multiple minutes, for a single connection attempt. That
+        was enough for Home Assistant to cancel an entire config entry's
+        setup, not just fail one reading. asyncio.wait_for(CONNECT_TIMEOUT)
+        around the connect call is the fix, and must not regress.
+        """
+        firmware_data = b"x" * MIN_FIRMWARE_SIZE
+
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = True
+        mock_client.write_gatt_char = AsyncMock()
+        mock_client.disconnect = AsyncMock()
+
+        real_wait_for = asyncio.wait_for
+        wait_for_timeouts = []
+
+        async def spy_wait_for(aw, timeout):
+            wait_for_timeouts.append(timeout)
+            return await real_wait_for(aw, timeout=timeout)
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.asyncio.wait_for",
+                side_effect=spy_wait_for,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.asyncio.sleep",
+                new=AsyncMock(),
+            ),
+        ):
+            result = await firmware_manager.flash_firmware(firmware_data)
+
+        assert result is True
+        # First wait_for call wraps the connect; the second wraps the OTA
+        # transfer phase (OTA_TRANSFER_TIMEOUT) - order matters here.
+        assert wait_for_timeouts[0] == CONNECT_TIMEOUT
 
     async def test_flash_firmware_with_progress_callback(self, firmware_manager):
         """Test firmware flash with progress callback."""
@@ -1055,6 +1110,48 @@ class TestFirmwareManager:
 
         assert version == "4.3"
         mock_client.disconnect.assert_called_once()
+
+    async def test_get_current_version_connect_is_bounded_by_connect_timeout(
+        self, firmware_manager
+    ):
+        """establish_connection() must be wrapped with CONNECT_TIMEOUT.
+
+        See the matching flash_firmware regression test for why: without
+        this, a marginal device can make a single version-check connection
+        attempt run for minutes, which during initial config entry setup
+        was enough for Home Assistant to cancel the whole entry's setup.
+        """
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = True
+        mock_client.read_gatt_char = AsyncMock(return_value=b"V4.3")
+        mock_client.disconnect = AsyncMock()
+
+        real_wait_for = asyncio.wait_for
+        wait_for_timeouts = []
+
+        async def spy_wait_for(aw, timeout):
+            wait_for_timeouts.append(timeout)
+            return await real_wait_for(aw, timeout=timeout)
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.asyncio.wait_for",
+                side_effect=spy_wait_for,
+            ),
+        ):
+            version = await firmware_manager.get_current_version()
+
+        assert version == "4.3"
+        assert wait_for_timeouts == [CONNECT_TIMEOUT]
 
     async def test_get_current_version_from_gatt_lowercase_prefix(
         self, firmware_manager
