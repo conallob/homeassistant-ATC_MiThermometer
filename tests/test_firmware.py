@@ -472,6 +472,42 @@ class TestFirmwareManager:
         assert result is False
         mock_client.disconnect.assert_called_once()
 
+    async def test_flash_firmware_disconnect_error_does_not_mask_result(
+        self, firmware_manager
+    ):
+        """A disconnect-time error must not override a real result.
+
+        If the link already dropped by the time we call disconnect(), that
+        raising is not something the caller can act on - it must not
+        replace a successful flash with a failure (or vice versa hide a
+        real failure), which a bare `finally: await client.disconnect()`
+        would otherwise do.
+        """
+        firmware_data = b"x" * MIN_FIRMWARE_SIZE
+
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = True
+        mock_client.write_gatt_char = AsyncMock()
+        mock_client.disconnect = AsyncMock(
+            side_effect=BleakError("already disconnected")
+        )
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
+            ),
+        ):
+            result = await firmware_manager.flash_firmware(firmware_data)
+
+        assert result is True
+        mock_client.disconnect.assert_called_once()
+
     async def test_flash_firmware_with_progress_callback(self, firmware_manager):
         """Test firmware flash with progress callback."""
         firmware_data = b"x" * MIN_FIRMWARE_SIZE
@@ -985,6 +1021,40 @@ class TestFirmwareManager:
             assert version == "4.3"
             mock_client.read_gatt_char.assert_called_once()
             mock_client.disconnect.assert_called_once()
+
+    async def test_get_current_version_disconnect_error_does_not_mask_result(
+        self, firmware_manager
+    ):
+        """A disconnect-time error must not discard a version already read.
+
+        Without the safety wrapper, a disconnect() failure in the finally
+        block would propagate past `return version`, get caught by the
+        broad `except (BleakError, TimeoutError)` around the connection
+        block, and fall through to the manufacturer-data fallback -
+        discarding a version that was actually read successfully.
+        """
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = True
+        mock_client.read_gatt_char = AsyncMock(return_value=b"V4.3")
+        mock_client.disconnect = AsyncMock(
+            side_effect=BleakError("already disconnected")
+        )
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
+            ),
+        ):
+            version = await firmware_manager.get_current_version()
+
+        assert version == "4.3"
+        mock_client.disconnect.assert_called_once()
 
     async def test_get_current_version_from_gatt_lowercase_prefix(
         self, firmware_manager

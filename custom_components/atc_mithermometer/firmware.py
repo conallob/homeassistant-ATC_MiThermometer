@@ -325,7 +325,7 @@ class FirmwareManager:
                 )
                 return True
             finally:
-                await client.disconnect()
+                await self._safe_disconnect(client)
 
         except BleakError as err:
             _LOGGER.error("BLE error during firmware flash: %s", err)
@@ -336,6 +336,20 @@ class FirmwareManager:
         except HomeAssistantError as err:
             _LOGGER.error("Home Assistant error during firmware flash: %s", err)
             return False
+
+    async def _safe_disconnect(self, client: BleakClient) -> None:
+        """Disconnect without letting a disconnect-time error mask a result.
+
+        A failure while disconnecting (e.g. the link already dropped) isn't
+        something the caller can act on, and letting it propagate out of a
+        connection block's finally would override whatever the try body
+        already produced - including a version that was already read
+        successfully in get_current_version().
+        """
+        try:
+            await client.disconnect()
+        except (BleakError, OSError) as err:
+            _LOGGER.debug("Error disconnecting from %s: %s", self.mac_address, err)
 
     async def _transfer_firmware(
         self,
@@ -898,7 +912,7 @@ class FirmwareManager:
                         return version
                     # If helper returns None, fall through to manufacturer data
                 finally:
-                    await client.disconnect()
+                    await self._safe_disconnect(client)
 
             except (BleakError, TimeoutError) as err:
                 # Use DEBUG level for expected fallback scenarios
