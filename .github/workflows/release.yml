@@ -65,8 +65,11 @@ jobs:
           # configured) would still see the OLD manifest.json version. Move
           # the tag itself to the bump commit so the tag - and therefore
           # the release - actually reflects the version it's named after.
+          # Recreated as an annotated tag (matching what GitHub creates
+          # when a release is published) rather than a lightweight one, so
+          # this doesn't silently drop the tag's metadata.
           TAG="${{ github.event.release.tag_name }}"
-          git tag -f "$TAG" HEAD
+          git tag -f -a "$TAG" -m "Release $TAG" HEAD
           git push origin "$TAG" --force
 
       - name: Create release asset zip

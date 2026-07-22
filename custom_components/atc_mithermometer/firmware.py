@@ -555,7 +555,7 @@ class FirmwareManager:
                 raise HomeAssistantError(
                     f"Error checking for release {version} of {repo}: {err}"
                 ) from err
-        else:
+        else:  # pragma: no cover
             # Not expected to be reachable given the branches above (every
             # path either returns, raises, or continues toward a final
             # raise), but fail loudly rather than silently claim "not

@@ -240,13 +240,9 @@ async def _async_apply_firmware(hass: HomeAssistant, call: ServiceCall) -> None:
     if not release:
         repo = FIRMWARE_SOURCES[firmware_source]["repo"]
         raise HomeAssistantError(
-            f"No release tagged '{desired_version}' exists for {repo}. "
-            f"desired_version must match a real GitHub release tag exactly "
-            f"(check https://github.com/{repo}/releases) - the version a "
-            f"device reports over Bluetooth is not guaranteed to correspond "
-            f"to a tagged release; devices flashed from a development build "
-            f"can report a version newer or different from anything ever "
-            f"published as a release."
+            f"No release tagged '{desired_version}' exists for {repo} - see "
+            f"https://github.com/{repo}/releases for valid versions. A "
+            f"device's self-reported version isn't always one of them."
         )
 
     _LOGGER.info(
