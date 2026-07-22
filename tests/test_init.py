@@ -1,14 +1,17 @@
 """Test the __init__ module."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.atc_mithermometer import (
+    _async_apply_firmware,
     _versions_equal,
     async_setup_entry,
     async_unload_entry,
@@ -24,6 +27,7 @@ from custom_components.atc_mithermometer.const import (
     FIRMWARE_SOURCE_PVVX,
     SERVICE_UUID_ENVIRONMENTAL,
 )
+from custom_components.atc_mithermometer.firmware import FirmwareRelease
 
 
 class TestIsATCMiThermometer:
@@ -474,3 +478,301 @@ async def test_get_bthome_device_by_mac_invalid_mac(hass: HomeAssistant):
     result = await get_bthome_device_by_mac(hass, mac_address)
 
     assert result is None
+
+
+class TestApplyFirmwareService:
+    """Test the apply_firmware service handler (_async_apply_firmware)."""
+
+    @pytest.fixture
+    def mock_call(self):
+        """Create a mock service call."""
+        call = MagicMock()
+        call.data = {"device_id": "device_1", "desired_version": "v5.8"}
+        return call
+
+    @pytest.fixture
+    def mock_device(self):
+        """Create a mock device registry entry with a Bluetooth connection."""
+        device = MagicMock()
+        device.connections = {(dr.CONNECTION_BLUETOOTH, "AA:BB:CC:DD:EE:FF")}
+        device.config_entries = ["entry_1"]
+        return device
+
+    @pytest.fixture
+    def mock_config_entry(self):
+        """Create a mock ATC MiThermometer config entry."""
+        entry = MagicMock()
+        entry.domain = DOMAIN
+        entry.data = {CONF_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX}
+        return entry
+
+    @pytest.fixture
+    def mock_firmware_manager(self):
+        """Create a mock FirmwareManager with a distinct current version."""
+        manager = MagicMock()
+        manager.get_current_version = AsyncMock(return_value="4.3")
+        manager.get_release_by_version = AsyncMock(
+            return_value=FirmwareRelease(
+                version="v5.8",
+                download_url="https://example.com/firmware.bin",
+                release_url="https://example.com/release",
+            )
+        )
+        manager.apply_firmware_update = AsyncMock(return_value=True)
+        return manager
+
+    async def test_device_not_found(self, hass: HomeAssistant, mock_call):
+        """Test error when device_id doesn't resolve to a registry entry."""
+        mock_device_registry = MagicMock()
+        mock_device_registry.async_get = MagicMock(return_value=None)
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.dr.async_get",
+                return_value=mock_device_registry,
+            ),
+            pytest.raises(HomeAssistantError, match="not found"),
+        ):
+            await _async_apply_firmware(hass, mock_call)
+
+    async def test_no_bluetooth_mac_address(self, hass: HomeAssistant, mock_call):
+        """Test error when the device has no Bluetooth connection."""
+        device = MagicMock()
+        device.connections = set()
+
+        mock_device_registry = MagicMock()
+        mock_device_registry.async_get = MagicMock(return_value=device)
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.dr.async_get",
+                return_value=mock_device_registry,
+            ),
+            pytest.raises(HomeAssistantError, match="No Bluetooth MAC address"),
+        ):
+            await _async_apply_firmware(hass, mock_call)
+
+    async def test_no_matching_config_entry(
+        self, hass: HomeAssistant, mock_call, mock_device
+    ):
+        """Test error when the device has no ATC MiThermometer config entry."""
+        mock_device_registry = MagicMock()
+        mock_device_registry.async_get = MagicMock(return_value=mock_device)
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.dr.async_get",
+                return_value=mock_device_registry,
+            ),
+            patch.object(hass.config_entries, "async_get_entry", return_value=None),
+            pytest.raises(HomeAssistantError, match="No ATC MiThermometer config"),
+        ):
+            await _async_apply_firmware(hass, mock_call)
+
+    async def test_already_at_desired_version_skips_update(
+        self,
+        hass: HomeAssistant,
+        mock_call,
+        mock_device,
+        mock_config_entry,
+        mock_firmware_manager,
+    ):
+        """Test that a matching current version skips the update entirely."""
+        mock_call.data = {"device_id": "device_1", "desired_version": "v4.3"}
+        mock_firmware_manager.get_current_version = AsyncMock(return_value="4.3")
+
+        mock_device_registry = MagicMock()
+        mock_device_registry.async_get = MagicMock(return_value=mock_device)
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.dr.async_get",
+                return_value=mock_device_registry,
+            ),
+            patch.object(
+                hass.config_entries,
+                "async_get_entry",
+                return_value=mock_config_entry,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.FirmwareManager",
+                return_value=mock_firmware_manager,
+            ),
+        ):
+            await _async_apply_firmware(hass, mock_call)
+
+        mock_firmware_manager.get_release_by_version.assert_not_called()
+        mock_firmware_manager.apply_firmware_update.assert_not_called()
+
+    async def test_unknown_current_version_still_proceeds(
+        self,
+        hass: HomeAssistant,
+        mock_call,
+        mock_device,
+        mock_config_entry,
+        mock_firmware_manager,
+    ):
+        """Test that an undetectable current version doesn't block the update."""
+        mock_firmware_manager.get_current_version = AsyncMock(return_value=None)
+
+        mock_device_registry = MagicMock()
+        mock_device_registry.async_get = MagicMock(return_value=mock_device)
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.dr.async_get",
+                return_value=mock_device_registry,
+            ),
+            patch.object(
+                hass.config_entries,
+                "async_get_entry",
+                return_value=mock_config_entry,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.FirmwareManager",
+                return_value=mock_firmware_manager,
+            ),
+        ):
+            await _async_apply_firmware(hass, mock_call)
+
+        mock_firmware_manager.apply_firmware_update.assert_called_once()
+
+    async def test_invalid_firmware_source(
+        self, hass: HomeAssistant, mock_call, mock_device, mock_firmware_manager
+    ):
+        """Test error when the config entry has an invalid firmware source."""
+        config_entry = MagicMock()
+        config_entry.domain = DOMAIN
+        config_entry.data = {CONF_FIRMWARE_SOURCE: "not_a_real_source"}
+
+        mock_device_registry = MagicMock()
+        mock_device_registry.async_get = MagicMock(return_value=mock_device)
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.dr.async_get",
+                return_value=mock_device_registry,
+            ),
+            patch.object(
+                hass.config_entries, "async_get_entry", return_value=config_entry
+            ),
+            patch(
+                "custom_components.atc_mithermometer.FirmwareManager",
+                return_value=mock_firmware_manager,
+            ),
+            pytest.raises(HomeAssistantError, match="Invalid firmware source"),
+        ):
+            await _async_apply_firmware(hass, mock_call)
+
+    async def test_version_not_found_error_names_the_repo(
+        self,
+        hass: HomeAssistant,
+        mock_call,
+        mock_device,
+        mock_config_entry,
+        mock_firmware_manager,
+    ):
+        """Test the not-found error explains it must match a real release tag.
+
+        Regression test for the confusing original message - doesn't pin
+        exact wording, just that it points at the real repo/releases page
+        rather than just repeating the version string back.
+        """
+        mock_firmware_manager.get_release_by_version = AsyncMock(return_value=None)
+
+        mock_device_registry = MagicMock()
+        mock_device_registry.async_get = MagicMock(return_value=mock_device)
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.dr.async_get",
+                return_value=mock_device_registry,
+            ),
+            patch.object(
+                hass.config_entries,
+                "async_get_entry",
+                return_value=mock_config_entry,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.FirmwareManager",
+                return_value=mock_firmware_manager,
+            ),
+            pytest.raises(
+                HomeAssistantError,
+                match="pvvx/ATC_MiThermometer/releases",
+            ),
+        ):
+            await _async_apply_firmware(hass, mock_call)
+
+    async def test_version_lookup_failure_propagates_as_is(
+        self,
+        hass: HomeAssistant,
+        mock_call,
+        mock_device,
+        mock_config_entry,
+        mock_firmware_manager,
+    ):
+        """A lookup failure (as opposed to a confirmed 404) must not be
+        reworded into the "no release tagged" message - that would
+        confidently claim something false about a transient failure.
+        """
+        mock_firmware_manager.get_release_by_version = AsyncMock(
+            side_effect=HomeAssistantError("GitHub API rate limit exceeded")
+        )
+
+        mock_device_registry = MagicMock()
+        mock_device_registry.async_get = MagicMock(return_value=mock_device)
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.dr.async_get",
+                return_value=mock_device_registry,
+            ),
+            patch.object(
+                hass.config_entries,
+                "async_get_entry",
+                return_value=mock_config_entry,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.FirmwareManager",
+                return_value=mock_firmware_manager,
+            ),
+            pytest.raises(HomeAssistantError, match="rate limit exceeded"),
+        ):
+            await _async_apply_firmware(hass, mock_call)
+
+    async def test_success_applies_firmware(
+        self,
+        hass: HomeAssistant,
+        mock_call,
+        mock_device,
+        mock_config_entry,
+        mock_firmware_manager,
+    ):
+        """Test the full happy path applies the located release."""
+        mock_device_registry = MagicMock()
+        mock_device_registry.async_get = MagicMock(return_value=mock_device)
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.dr.async_get",
+                return_value=mock_device_registry,
+            ),
+            patch.object(
+                hass.config_entries,
+                "async_get_entry",
+                return_value=mock_config_entry,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.FirmwareManager",
+                return_value=mock_firmware_manager,
+            ),
+        ):
+            await _async_apply_firmware(hass, mock_call)
+
+        mock_firmware_manager.get_release_by_version.assert_called_once_with(
+            FIRMWARE_SOURCE_PVVX, "v5.8"
+        )
+        mock_firmware_manager.apply_firmware_update.assert_called_once()
+        call_args = mock_firmware_manager.apply_firmware_update.call_args
+        assert call_args[0][0].version == "v5.8"

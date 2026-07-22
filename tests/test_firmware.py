@@ -8,6 +8,7 @@ import aiohttp
 import pytest
 from bleak import BleakClient, BleakError
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.atc_mithermometer.const import (
     CONNECT_TIMEOUT,
@@ -279,6 +280,126 @@ class TestFirmwareManager:
             mock_get.assert_called_once()
             mock_response.json.assert_called_once()
 
+    async def test_get_release_by_version_success(
+        self, firmware_manager, mock_github_release_data
+    ):
+        """Test getting a specific tagged release successfully."""
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value=mock_github_release_data)
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(
+            firmware_manager._session,
+            "get",
+            return_value=mock_response,
+        ) as mock_get:
+            release = await firmware_manager.get_release_by_version(
+                FIRMWARE_SOURCE_PVVX, "v1.2.3"
+            )
+
+        assert release is not None
+        assert release.version == "v1.2.3"
+        mock_get.assert_called_once()
+        called_url = mock_get.call_args[0][0]
+        assert called_url.endswith("/releases/tags/v1.2.3")
+
+    async def test_get_release_by_version_not_found_returns_none(
+        self, firmware_manager
+    ):
+        """A true 404 means the version genuinely doesn't exist - return None.
+
+        This is the one case callers are allowed to treat as "no such
+        release" rather than "the lookup failed" (see the other tests in
+        this group).
+        """
+        mock_response = AsyncMock()
+        mock_response.status = 404
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
+
+        with patch.object(
+            firmware_manager._session,
+            "get",
+            return_value=mock_response,
+        ):
+            release = await firmware_manager.get_release_by_version(
+                FIRMWARE_SOURCE_PVVX, "v5.8"
+            )
+
+        assert release is None
+
+    async def test_get_release_by_version_http_error_raises(self, firmware_manager):
+        """A non-404 HTTP error must raise, not silently return None.
+
+        Regression test: returning None here would be indistinguishable
+        from a genuine "no such release" 404 to callers, which previously
+        led to a confidently-wrong "no release tagged X exists" error
+        message on what was actually a transient GitHub API failure.
+        """
+        mock_response = AsyncMock()
+        mock_response.status = 500
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
+
+        with (
+            patch.object(
+                firmware_manager._session,
+                "get",
+                return_value=mock_response,
+            ),
+            pytest.raises(HomeAssistantError, match="HTTP 500"),
+        ):
+            await firmware_manager.get_release_by_version(FIRMWARE_SOURCE_PVVX, "v5.8")
+
+    async def test_get_release_by_version_timeout_raises(self, firmware_manager):
+        """A timeout checking for a release must raise, not return None."""
+        with (
+            patch.object(
+                firmware_manager._session,
+                "get",
+                side_effect=TimeoutError(),
+            ),
+            pytest.raises(HomeAssistantError, match="Timeout"),
+        ):
+            await firmware_manager.get_release_by_version(FIRMWARE_SOURCE_PVVX, "v5.8")
+
+    async def test_get_release_by_version_client_error_raises(self, firmware_manager):
+        """A network error checking for a release must raise, not return None."""
+        with (
+            patch.object(
+                firmware_manager._session,
+                "get",
+                side_effect=aiohttp.ClientError("boom"),
+            ),
+            pytest.raises(HomeAssistantError, match="boom"),
+        ):
+            await firmware_manager.get_release_by_version(FIRMWARE_SOURCE_PVVX, "v5.8")
+
+    async def test_get_release_by_version_rate_limit_exhausted_raises(
+        self, firmware_manager
+    ):
+        """Exhausting rate-limit retries must raise, not return None."""
+        mock_response = AsyncMock()
+        mock_response.status = 429
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=None)
+
+        with (
+            patch.object(
+                firmware_manager._session,
+                "get",
+                return_value=mock_response,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.asyncio.sleep",
+                new=AsyncMock(),
+            ),
+            pytest.raises(HomeAssistantError, match="rate limit"),
+        ):
+            await firmware_manager.get_release_by_version(FIRMWARE_SOURCE_PVVX, "v5.8")
+
     async def test_download_firmware_success(self, firmware_manager):
         """Test successful firmware download."""
         firmware_data = b"x" * 10000  # Valid size
@@ -301,7 +422,7 @@ class TestFirmwareManager:
             assert result == firmware_data
             mock_get.assert_called_once_with(
                 "https://example.com/firmware.bin",
-                timeout=aiohttp.ClientTimeout(total=60)
+                timeout=aiohttp.ClientTimeout(total=60),
             )
             mock_response.read.assert_called_once()
 
@@ -324,7 +445,7 @@ class TestFirmwareManager:
             assert result is None
             mock_get.assert_called_once_with(
                 "https://example.com/firmware.bin",
-                timeout=aiohttp.ClientTimeout(total=60)
+                timeout=aiohttp.ClientTimeout(total=60),
             )
 
     async def test_download_firmware_too_small(self, firmware_manager):
@@ -349,7 +470,7 @@ class TestFirmwareManager:
             assert result is None
             mock_get.assert_called_once_with(
                 "https://example.com/firmware.bin",
-                timeout=aiohttp.ClientTimeout(total=60)
+                timeout=aiohttp.ClientTimeout(total=60),
             )
             mock_response.read.assert_called_once()
 
@@ -375,7 +496,7 @@ class TestFirmwareManager:
             assert result is None
             mock_get.assert_called_once_with(
                 "https://example.com/firmware.bin",
-                timeout=aiohttp.ClientTimeout(total=60)
+                timeout=aiohttp.ClientTimeout(total=60),
             )
             mock_response.read.assert_called_once()
 
@@ -393,7 +514,7 @@ class TestFirmwareManager:
             assert result is None
             mock_get.assert_called_once_with(
                 "https://example.com/firmware.bin",
-                timeout=aiohttp.ClientTimeout(total=60)
+                timeout=aiohttp.ClientTimeout(total=60),
             )
 
     async def test_download_firmware_network_error(self, firmware_manager):
@@ -410,7 +531,7 @@ class TestFirmwareManager:
             assert result is None
             mock_get.assert_called_once_with(
                 "https://example.com/firmware.bin",
-                timeout=aiohttp.ClientTimeout(total=60)
+                timeout=aiohttp.ClientTimeout(total=60),
             )
 
     async def test_flash_firmware_success(self, firmware_manager):
@@ -1456,9 +1577,7 @@ class TestFirmwareManager:
             # Should fall back to manufacturer data when GATT returns None
             assert version == "2.3"
 
-    async def test_get_current_version_gatt_max_length_boundary(
-        self, firmware_manager
-    ):
+    async def test_get_current_version_gatt_max_length_boundary(self, firmware_manager):
         """Test GATT version at the MAX_VERSION_LENGTH boundary (20 chars).
 
         The longest string VERSION_VALIDATION_PATTERN can ever accept is 16
@@ -1471,9 +1590,7 @@ class TestFirmwareManager:
         mock_client = AsyncMock(spec=BleakClient)
         mock_client.is_connected = True
         # Exactly 20 characters: "123.456.789.0123456" (19 chars + "V" prefix = 20)
-        mock_client.read_gatt_char = AsyncMock(
-            return_value=b"123.456.789.0123456"
-        )
+        mock_client.read_gatt_char = AsyncMock(return_value=b"123.456.789.0123456")
         mock_client.disconnect = AsyncMock()
 
         mock_service_info = MagicMock()
@@ -1500,17 +1617,13 @@ class TestFirmwareManager:
             # Not a valid version format, so GATT rejects it and we fall back
             assert version == "2.3"
 
-    async def test_get_current_version_gatt_exceeds_max_length(
-        self, firmware_manager
-    ):
+    async def test_get_current_version_gatt_exceeds_max_length(self, firmware_manager):
         """Test GATT version exceeding MAX_VERSION_LENGTH falls back."""
         mock_ble_device = MagicMock()
         mock_client = AsyncMock(spec=BleakClient)
         mock_client.is_connected = True
         # 21 characters exceeds MAX_VERSION_LENGTH (20)
-        mock_client.read_gatt_char = AsyncMock(
-            return_value=b"123.456.789.01234567"
-        )
+        mock_client.read_gatt_char = AsyncMock(return_value=b"123.456.789.01234567")
         mock_client.disconnect = AsyncMock()
 
         mock_service_info = MagicMock()
