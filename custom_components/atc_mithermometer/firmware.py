@@ -484,8 +484,10 @@ class FirmwareManager:
             version: The specific version to fetch (e.g., "v4.5")
 
         Returns:
-            FirmwareRelease object if a release tagged `version` exists,
-            None only if GitHub confirmed (via HTTP 404) that it doesn't.
+            FirmwareRelease object if a release tagged `version` exists.
+            None if GitHub confirmed (via HTTP 404) that it doesn't, or if
+            firmware_source itself isn't recognized (unreachable via the
+            current caller, which already validates it beforehand).
 
         Raises:
             HomeAssistantError: If the lookup itself couldn't be completed
@@ -496,6 +498,8 @@ class FirmwareManager:
                 when the real cause was a transient GitHub API failure.
         """
         if firmware_source not in FIRMWARE_SOURCES:
+            # Unreachable via _async_apply_firmware, the only current
+            # caller, which validates firmware_source before calling this.
             _LOGGER.error("Unknown firmware source: %s", firmware_source)
             return None
 
