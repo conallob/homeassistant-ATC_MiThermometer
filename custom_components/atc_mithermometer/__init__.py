@@ -238,9 +238,11 @@ async def _async_apply_firmware(hass: HomeAssistant, call: ServiceCall) -> None:
     )
 
     if not release:
+        repo = FIRMWARE_SOURCES[firmware_source]["repo"]
         raise HomeAssistantError(
-            f"Firmware version {desired_version} not found for source "
-            f"{firmware_source}. Please check the version number and try again."
+            f"No release tagged '{desired_version}' exists for {repo} - see "
+            f"https://github.com/{repo}/releases for valid versions. A "
+            f"device's self-reported version isn't always one of them."
         )
 
     _LOGGER.info(

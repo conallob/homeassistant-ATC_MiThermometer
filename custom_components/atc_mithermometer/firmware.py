@@ -484,9 +484,22 @@ class FirmwareManager:
             version: The specific version to fetch (e.g., "v4.5")
 
         Returns:
-            FirmwareRelease object if found, None otherwise
+            FirmwareRelease object if a release tagged `version` exists.
+            None if GitHub confirmed (via HTTP 404) that it doesn't, or if
+            firmware_source itself isn't recognized (unreachable via the
+            current caller, which already validates it beforehand).
+
+        Raises:
+            HomeAssistantError: If the lookup itself couldn't be completed
+                (network error, timeout, rate limit, non-404 HTTP error).
+                This is deliberately distinct from returning None: callers
+                use None to mean "confirmed no such release exists" and
+                would otherwise tell users that a version doesn't exist
+                when the real cause was a transient GitHub API failure.
         """
         if firmware_source not in FIRMWARE_SOURCES:
+            # Unreachable via _async_apply_firmware, the only current
+            # caller, which validates firmware_source before calling this.
             _LOGGER.error("Unknown firmware source: %s", firmware_source)
             return None
 
@@ -522,32 +535,39 @@ class FirmwareManager:
                             await asyncio.sleep(delay)
                             continue
                         else:
-                            _LOGGER.error(
-                                "GitHub API rate limit exceeded after %d retries",
-                                self._max_retries,
+                            raise HomeAssistantError(
+                                f"GitHub API rate limit exceeded after "
+                                f"{self._max_retries} retries while checking "
+                                f"for release {version} of {repo}"
                             )
-                            return None
 
                     if response.status != 200:
-                        _LOGGER.error(
-                            "Failed to fetch release %s: HTTP %s",
-                            version,
-                            response.status,
+                        raise HomeAssistantError(
+                            f"Failed to check for release {version} of "
+                            f"{repo}: GitHub API returned "
+                            f"HTTP {response.status}"
                         )
-                        return None
 
                     data = await response.json()
                     break  # Success, exit retry loop
 
-            except TimeoutError:
-                _LOGGER.error("Timeout fetching firmware release %s", version)
-                return None
+            except TimeoutError as err:
+                raise HomeAssistantError(
+                    f"Timeout checking for release {version} of {repo}"
+                ) from err
             except aiohttp.ClientError as err:
-                _LOGGER.error("Error fetching firmware release %s: %s", version, err)
-                return None
-        else:
-            # All retries exhausted
-            return None
+                raise HomeAssistantError(
+                    f"Error checking for release {version} of {repo}: {err}"
+                ) from err
+        else:  # pragma: no cover
+            # Not expected to be reachable given the branches above (every
+            # path either returns, raises, or continues toward a final
+            # raise), but fail loudly rather than silently claim "not
+            # found" if it somehow is.
+            raise HomeAssistantError(
+                f"Failed to check for release {version} of {repo} after "
+                f"{self._max_retries} retries"
+            )
 
         try:
             # Find matching binary asset
