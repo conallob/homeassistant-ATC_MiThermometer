@@ -38,6 +38,7 @@ jobs:
           cat "$MANIFEST"
 
       - name: Commit and push changes
+        id: commit
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
@@ -47,11 +48,26 @@ jobs:
           # Check if there are changes to commit
           if git diff --staged --quiet; then
             echo "No changes to commit"
+            echo "committed=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
           git commit -m "chore: update manifest.json to version ${{ steps.version.outputs.version }}"
           git push origin HEAD:${{ github.event.release.target_commitish }}
+          echo "committed=true" >> $GITHUB_OUTPUT
+
+      - name: Move release tag to the bump commit
+        if: steps.commit.outputs.committed == 'true'
+        run: |
+          # The release/tag was already published against the pre-bump
+          # commit, so as-is it (and anything downloading the tag's source
+          # archive, e.g. HACS without a custom zip_release asset
+          # configured) would still see the OLD manifest.json version. Move
+          # the tag itself to the bump commit so the tag - and therefore
+          # the release - actually reflects the version it's named after.
+          TAG="${{ github.event.release.tag_name }}"
+          git tag -f "$TAG" HEAD
+          git push origin "$TAG" --force
 
       - name: Create release asset zip
         run: |
