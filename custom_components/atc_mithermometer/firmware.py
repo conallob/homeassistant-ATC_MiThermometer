@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 import aiohttp
 from bleak import BleakClient, BleakError
+from bleak_retry_connector import establish_connection
 from homeassistant.components import bluetooth
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -20,8 +21,6 @@ from .const import (
     CHAR_UUID_OTA,
     CHAR_UUID_SOFTWARE_REVISION,
     FIRMWARE_SOURCES,
-    FLASH_TIMEOUT,
-    GATT_CONNECTION_TIMEOUT,
     MAX_FIRMWARE_SIZE,
     MAX_VERSION_LENGTH,
     MIN_FIRMWARE_SIZE,
@@ -304,11 +303,14 @@ class FirmwareManager:
             if not ble_device:
                 raise HomeAssistantError(f"Device {self.mac_address} not found")
 
-            async with BleakClient(ble_device, timeout=FLASH_TIMEOUT) as client:
-                # Verify connection
-                if not client.is_connected:
-                    raise HomeAssistantError("Failed to connect to device")
-
+            # establish_connection retries with backoff on the normal transient
+            # BLE failures (busy adapter/proxy, stale cache, etc.) instead of
+            # failing on the first attempt like a bare BleakClient().connect()
+            # would - see https://github.com/Bluetooth-Devices/bleak-retry-connector
+            client = await establish_connection(
+                BleakClient, ble_device, self.mac_address
+            )
+            try:
                 _LOGGER.info("Connected to device %s", self.mac_address)
 
                 await asyncio.wait_for(
@@ -322,6 +324,8 @@ class FirmwareManager:
                     self.mac_address,
                 )
                 return True
+            finally:
+                await client.disconnect()
 
         except BleakError as err:
             _LOGGER.error("BLE error during firmware flash: %s", err)
@@ -879,15 +883,22 @@ class FirmwareManager:
             # rather than staying silent at debug forever.
             self._connectable_warning_logged = False
 
-            # Try to read version from Device Information Service
+            # Try to read version from Device Information Service.
+            # establish_connection retries with backoff on the normal
+            # transient BLE failures instead of failing on the first
+            # attempt like a bare BleakClient().connect() would - see
+            # https://github.com/Bluetooth-Devices/bleak-retry-connector
             try:
-                async with BleakClient(
-                    ble_device, timeout=GATT_CONNECTION_TIMEOUT
-                ) as client:
+                client = await establish_connection(
+                    BleakClient, ble_device, self.mac_address
+                )
+                try:
                     version = await self._read_version_from_gatt(client)
                     if version:
                         return version
                     # If helper returns None, fall through to manufacturer data
+                finally:
+                    await client.disconnect()
 
             except (BleakError, TimeoutError) as err:
                 # Use DEBUG level for expected fallback scenarios
