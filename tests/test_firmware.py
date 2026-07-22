@@ -420,8 +420,7 @@ class TestFirmwareManager:
         mock_client = AsyncMock(spec=BleakClient)
         mock_client.is_connected = True
         mock_client.write_gatt_char = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
+        mock_client.disconnect = AsyncMock()
 
         with (
             patch(
@@ -429,8 +428,8 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ) as mock_get_device,
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
-                return_value=mock_client,
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
             ) as mock_bleak,
         ):
             result = await firmware_manager.flash_firmware(firmware_data)
@@ -439,6 +438,75 @@ class TestFirmwareManager:
             mock_get_device.assert_called_once()
             mock_bleak.assert_called_once()
             assert mock_client.write_gatt_char.called
+            mock_client.disconnect.assert_called_once()
+
+    async def test_flash_firmware_disconnects_even_on_transfer_error(
+        self, firmware_manager
+    ):
+        """The connection must be released even if the transfer itself fails.
+
+        establish_connection() doesn't manage disconnection as a context
+        manager, so this relies on the try/finally in flash_firmware() -
+        a transfer error must not leak the connection.
+        """
+        firmware_data = b"x" * MIN_FIRMWARE_SIZE
+
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = True
+        mock_client.write_gatt_char = AsyncMock(side_effect=BleakError("write failed"))
+        mock_client.disconnect = AsyncMock()
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
+            ),
+        ):
+            result = await firmware_manager.flash_firmware(firmware_data)
+
+        assert result is False
+        mock_client.disconnect.assert_called_once()
+
+    async def test_flash_firmware_disconnect_error_does_not_mask_result(
+        self, firmware_manager
+    ):
+        """A disconnect-time error must not override a real result.
+
+        If the link already dropped by the time we call disconnect(), that
+        raising is not something the caller can act on - it must not
+        replace a successful flash with a failure (or vice versa hide a
+        real failure), which a bare `finally: await client.disconnect()`
+        would otherwise do.
+        """
+        firmware_data = b"x" * MIN_FIRMWARE_SIZE
+
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = True
+        mock_client.write_gatt_char = AsyncMock()
+        mock_client.disconnect = AsyncMock(
+            side_effect=BleakError("already disconnected")
+        )
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
+            ),
+        ):
+            result = await firmware_manager.flash_firmware(firmware_data)
+
+        assert result is True
+        mock_client.disconnect.assert_called_once()
 
     async def test_flash_firmware_with_progress_callback(self, firmware_manager):
         """Test firmware flash with progress callback."""
@@ -448,8 +516,7 @@ class TestFirmwareManager:
         mock_client = AsyncMock(spec=BleakClient)
         mock_client.is_connected = True
         mock_client.write_gatt_char = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
+        mock_client.disconnect = AsyncMock()
 
         progress_calls = []
 
@@ -462,8 +529,8 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ),
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
-                return_value=mock_client,
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
             ),
         ):
             result = await firmware_manager.flash_firmware(
@@ -489,14 +556,15 @@ class TestFirmwareManager:
             mock_get_device.assert_called_once()
 
     async def test_flash_firmware_connection_failed(self, firmware_manager):
-        """Test firmware flash when connection fails."""
+        """Test firmware flash when establish_connection can't connect.
+
+        establish_connection() only ever returns an already-connected
+        client - on failure (after exhausting its own retries) it raises,
+        it never hands back a client with is_connected=False.
+        """
         firmware_data = b"x" * MIN_FIRMWARE_SIZE
 
         mock_ble_device = MagicMock()
-        mock_client = AsyncMock(spec=BleakClient)
-        mock_client.is_connected = False
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with (
             patch(
@@ -504,8 +572,8 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ) as mock_get_device,
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
-                return_value=mock_client,
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(side_effect=BleakError("Failed to connect after 4 attempts")),
             ) as mock_bleak,
         ):
             result = await firmware_manager.flash_firmware(firmware_data)
@@ -526,7 +594,7 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ) as mock_get_device,
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
+                "custom_components.atc_mithermometer.firmware.establish_connection",
                 side_effect=BleakError("Connection failed"),
             ) as mock_bleak,
         ):
@@ -548,7 +616,7 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ) as mock_get_device,
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
+                "custom_components.atc_mithermometer.firmware.establish_connection",
                 side_effect=asyncio.TimeoutError(),
             ) as mock_bleak,
         ):
@@ -605,8 +673,7 @@ class TestFirmwareManager:
         mock_client = AsyncMock(spec=BleakClient)
         mock_client.is_connected = True
         mock_client.write_gatt_char = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
+        mock_client.disconnect = AsyncMock()
 
         with (
             patch(
@@ -614,8 +681,8 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ),
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
-                return_value=mock_client,
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
             ),
             patch(
                 "custom_components.atc_mithermometer.firmware.asyncio.sleep",
@@ -646,8 +713,7 @@ class TestFirmwareManager:
         mock_client = AsyncMock(spec=BleakClient)
         mock_client.is_connected = True
         mock_client.write_gatt_char = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
+        mock_client.disconnect = AsyncMock()
 
         with (
             patch(
@@ -655,8 +721,8 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ),
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
-                return_value=mock_client,
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
             ),
             patch(
                 "custom_components.atc_mithermometer.firmware.asyncio.sleep",
@@ -708,8 +774,7 @@ class TestFirmwareManager:
         mock_client = AsyncMock(spec=BleakClient)
         mock_client.is_connected = True
         mock_client.write_gatt_char = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
+        mock_client.disconnect = AsyncMock()
 
         with (
             patch(
@@ -717,8 +782,8 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ),
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
-                return_value=mock_client,
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
             ),
             patch(
                 "custom_components.atc_mithermometer.firmware.asyncio.sleep",
@@ -758,8 +823,7 @@ class TestFirmwareManager:
         # Mock BLE client that fails to connect (triggers fallback to manufacturer data)
         mock_client = AsyncMock(spec=BleakClient)
         mock_client.is_connected = False
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
+        mock_client.disconnect = AsyncMock()
 
         mock_service_info = MagicMock()
         mock_service_info.manufacturer_data = {
@@ -772,8 +836,8 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ),
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
-                return_value=mock_client,
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
             ),
             patch(
                 "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
@@ -842,7 +906,7 @@ class TestFirmwareManager:
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
+                "custom_components.atc_mithermometer.firmware.establish_connection",
                 side_effect=BleakError("simulated transient failure"),
             ),
             patch(
@@ -871,8 +935,7 @@ class TestFirmwareManager:
         # Mock BLE client that fails to connect (triggers fallback to manufacturer data)
         mock_client = AsyncMock(spec=BleakClient)
         mock_client.is_connected = False
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
+        mock_client.disconnect = AsyncMock()
 
         mock_service_info = MagicMock()
         mock_service_info.manufacturer_data = {}
@@ -883,8 +946,8 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ),
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
-                return_value=mock_client,
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
             ),
             patch(
                 "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
@@ -902,8 +965,7 @@ class TestFirmwareManager:
         # Mock BLE client that fails to connect (triggers fallback to manufacturer data)
         mock_client = AsyncMock(spec=BleakClient)
         mock_client.is_connected = False
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
+        mock_client.disconnect = AsyncMock()
 
         mock_service_info = MagicMock()
         mock_service_info.manufacturer_data = {0x0001: bytes([0x00, 0x01])}  # Too short
@@ -914,8 +976,8 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ),
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
-                return_value=mock_client,
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
             ),
             patch(
                 "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
@@ -942,8 +1004,7 @@ class TestFirmwareManager:
         mock_client = AsyncMock(spec=BleakClient)
         mock_client.is_connected = True
         mock_client.read_gatt_char = AsyncMock(return_value=b"V4.3")
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
+        mock_client.disconnect = AsyncMock()
 
         with (
             patch(
@@ -951,14 +1012,49 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ),
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
-                return_value=mock_client,
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
             ),
         ):
             version = await firmware_manager.get_current_version()
 
             assert version == "4.3"
             mock_client.read_gatt_char.assert_called_once()
+            mock_client.disconnect.assert_called_once()
+
+    async def test_get_current_version_disconnect_error_does_not_mask_result(
+        self, firmware_manager
+    ):
+        """A disconnect-time error must not discard a version already read.
+
+        Without the safety wrapper, a disconnect() failure in the finally
+        block would propagate past `return version`, get caught by the
+        broad `except (BleakError, TimeoutError)` around the connection
+        block, and fall through to the manufacturer-data fallback -
+        discarding a version that was actually read successfully.
+        """
+        mock_ble_device = MagicMock()
+        mock_client = AsyncMock(spec=BleakClient)
+        mock_client.is_connected = True
+        mock_client.read_gatt_char = AsyncMock(return_value=b"V4.3")
+        mock_client.disconnect = AsyncMock(
+            side_effect=BleakError("already disconnected")
+        )
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.firmware.bluetooth.async_ble_device_from_address",
+                return_value=mock_ble_device,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
+            ),
+        ):
+            version = await firmware_manager.get_current_version()
+
+        assert version == "4.3"
+        mock_client.disconnect.assert_called_once()
 
     async def test_get_current_version_from_gatt_lowercase_prefix(
         self, firmware_manager
@@ -968,8 +1064,7 @@ class TestFirmwareManager:
         mock_client = AsyncMock(spec=BleakClient)
         mock_client.is_connected = True
         mock_client.read_gatt_char = AsyncMock(return_value=b"v3.2.1")
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
+        mock_client.disconnect = AsyncMock()
 
         with (
             patch(
@@ -977,8 +1072,8 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ),
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
-                return_value=mock_client,
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
             ),
         ):
             version = await firmware_manager.get_current_version()
@@ -991,8 +1086,7 @@ class TestFirmwareManager:
         mock_client = AsyncMock(spec=BleakClient)
         mock_client.is_connected = True
         mock_client.read_gatt_char = AsyncMock(return_value=b"2.0")
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
+        mock_client.disconnect = AsyncMock()
 
         with (
             patch(
@@ -1000,8 +1094,8 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ),
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
-                return_value=mock_client,
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
             ),
         ):
             version = await firmware_manager.get_current_version()
@@ -1016,8 +1110,7 @@ class TestFirmwareManager:
         mock_client = AsyncMock(spec=BleakClient)
         mock_client.is_connected = True
         mock_client.read_gatt_char = AsyncMock(return_value=b"  V5.1  ")
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
+        mock_client.disconnect = AsyncMock()
 
         with (
             patch(
@@ -1025,8 +1118,8 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ),
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
-                return_value=mock_client,
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
             ),
         ):
             version = await firmware_manager.get_current_version()
@@ -1040,8 +1133,7 @@ class TestFirmwareManager:
         mock_client.is_connected = True
         # Only contains prefix, nothing after
         mock_client.read_gatt_char = AsyncMock(return_value=b"V")
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
+        mock_client.disconnect = AsyncMock()
 
         mock_service_info = MagicMock()
         mock_service_info.manufacturer_data = {
@@ -1054,8 +1146,8 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ),
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
-                return_value=mock_client,
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
             ),
             patch(
                 "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
@@ -1076,8 +1168,7 @@ class TestFirmwareManager:
         mock_client.read_gatt_char = AsyncMock(
             return_value=b"V4.\xff\xfe3"  # Invalid UTF-8
         )
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
+        mock_client.disconnect = AsyncMock()
 
         # Mock manufacturer data for fallback
         mock_service_info = MagicMock()
@@ -1091,8 +1182,8 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ),
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
-                return_value=mock_client,
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
             ),
             patch(
                 "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
@@ -1110,8 +1201,7 @@ class TestFirmwareManager:
         mock_client = AsyncMock(spec=BleakClient)
         mock_client.is_connected = True
         mock_client.read_gatt_char = AsyncMock(side_effect=asyncio.TimeoutError())
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
+        mock_client.disconnect = AsyncMock()
 
         mock_service_info = MagicMock()
         mock_service_info.manufacturer_data = {
@@ -1124,8 +1214,8 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ),
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
-                return_value=mock_client,
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
             ),
             patch(
                 "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
@@ -1147,8 +1237,7 @@ class TestFirmwareManager:
         mock_client.read_gatt_char = AsyncMock(
             side_effect=BleakError("Characteristic not found")
         )
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
+        mock_client.disconnect = AsyncMock()
 
         mock_service_info = MagicMock()
         mock_service_info.manufacturer_data = {
@@ -1161,8 +1250,8 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ),
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
-                return_value=mock_client,
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
             ),
             patch(
                 "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
@@ -1179,8 +1268,7 @@ class TestFirmwareManager:
         mock_ble_device = MagicMock()
         mock_client = AsyncMock(spec=BleakClient)
         mock_client.is_connected = False  # Connection failed
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.disconnect = AsyncMock()
 
         mock_service_info = MagicMock()
         mock_service_info.manufacturer_data = {
@@ -1193,8 +1281,8 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ),
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
-                return_value=mock_client,
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
             ),
             patch(
                 "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
@@ -1212,8 +1300,7 @@ class TestFirmwareManager:
         mock_client = AsyncMock(spec=BleakClient)
         mock_client.is_connected = True
         mock_client.read_gatt_char = AsyncMock(return_value=b"")
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
+        mock_client.disconnect = AsyncMock()
 
         mock_service_info = MagicMock()
         mock_service_info.manufacturer_data = {
@@ -1226,8 +1313,8 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ),
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
-                return_value=mock_client,
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
             ),
             patch(
                 "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
@@ -1246,8 +1333,7 @@ class TestFirmwareManager:
         mock_client.is_connected = True
         # Return None instead of bytes
         mock_client.read_gatt_char = AsyncMock(return_value=None)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock()
+        mock_client.disconnect = AsyncMock()
 
         mock_service_info = MagicMock()
         mock_service_info.manufacturer_data = {
@@ -1260,8 +1346,8 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ),
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
-                return_value=mock_client,
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
             ),
             patch(
                 "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
@@ -1291,8 +1377,7 @@ class TestFirmwareManager:
         mock_client.read_gatt_char = AsyncMock(
             return_value=b"123.456.789.0123456"
         )
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.disconnect = AsyncMock()
 
         mock_service_info = MagicMock()
         mock_service_info.manufacturer_data = {
@@ -1305,8 +1390,8 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ),
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
-                return_value=mock_client,
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
             ),
             patch(
                 "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
@@ -1329,8 +1414,7 @@ class TestFirmwareManager:
         mock_client.read_gatt_char = AsyncMock(
             return_value=b"123.456.789.01234567"
         )
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.disconnect = AsyncMock()
 
         mock_service_info = MagicMock()
         mock_service_info.manufacturer_data = {
@@ -1343,8 +1427,8 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ),
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
-                return_value=mock_client,
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
             ),
             patch(
                 "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
@@ -1365,8 +1449,7 @@ class TestFirmwareManager:
         mock_client.is_connected = True
         # "Vabc" -> after removing "V" = "abc", which is invalid
         mock_client.read_gatt_char = AsyncMock(return_value=b"Vabc")
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.disconnect = AsyncMock()
 
         mock_service_info = MagicMock()
         mock_service_info.manufacturer_data = {
@@ -1379,8 +1462,8 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ),
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
-                return_value=mock_client,
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
             ),
             patch(
                 "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",
@@ -1401,8 +1484,7 @@ class TestFirmwareManager:
         mock_client.is_connected = True
         # "V4" -> after removing "V" = "4", which doesn't match major.minor pattern
         mock_client.read_gatt_char = AsyncMock(return_value=b"V4")
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.disconnect = AsyncMock()
 
         mock_service_info = MagicMock()
         mock_service_info.manufacturer_data = {
@@ -1415,8 +1497,8 @@ class TestFirmwareManager:
                 return_value=mock_ble_device,
             ),
             patch(
-                "custom_components.atc_mithermometer.firmware.BleakClient",
-                return_value=mock_client,
+                "custom_components.atc_mithermometer.firmware.establish_connection",
+                AsyncMock(return_value=mock_client),
             ),
             patch(
                 "custom_components.atc_mithermometer.firmware.bluetooth.async_last_service_info",

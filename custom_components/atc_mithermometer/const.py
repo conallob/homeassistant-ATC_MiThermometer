@@ -67,10 +67,12 @@ OTA_TRAILER_SEQ: Final = 0xFF
 # Check for updates every 6 hours to avoid GitHub API rate limits
 # GitHub has a rate limit of 60 requests/hour for unauthenticated requests
 UPDATE_CHECK_INTERVAL: Final = timedelta(hours=6)
-GATT_CONNECTION_TIMEOUT: Final = 30  # Timeout for GATT characteristic reads
-FLASH_TIMEOUT: Final = 300  # Timeout for the initial BLE connection when flashing
+# Connection establishment (both for version reads and flashing) goes through
+# bleak_retry_connector.establish_connection(), which has its own built-in
+# per-attempt timeout and retry/backoff policy - see firmware.py. There's no
+# separate connect timeout constant here for that reason.
 # Ceiling for the whole OTA data-transfer phase (start command through end
-# command), separate from FLASH_TIMEOUT above which only bounds connecting.
+# command), i.e. after the connection is already established.
 # At OTA_PACKET_PAYLOAD_SIZE=17 bytes/packet and OTA_CHUNK_DELAY=0.02s, even
 # the largest allowed image (MAX_FIRMWARE_SIZE, 512K) needs roughly
 # 512*1024/17*0.02 =~ 620s of scheduled inter-packet delay; this gives that
