@@ -68,9 +68,17 @@ OTA_TRAILER_SEQ: Final = 0xFF
 # GitHub has a rate limit of 60 requests/hour for unauthenticated requests
 UPDATE_CHECK_INTERVAL: Final = timedelta(hours=6)
 # Connection establishment (both for version reads and flashing) goes through
-# bleak_retry_connector.establish_connection(), which has its own built-in
-# per-attempt timeout and retry/backoff policy - see firmware.py. There's no
-# separate connect timeout constant here for that reason.
+# bleak_retry_connector.establish_connection(), which has its own per-attempt
+# timeout and retry/backoff policy - but its retry accounting tracks timeouts
+# and "transient" errors as separate budgets, so a device producing a mix of
+# both can end up retrying far past its documented default of 4 attempts
+# (observed in production: single connection attempts running 9-10 retries,
+# multiple minutes). Wrapping the call in asyncio.wait_for(CONNECT_TIMEOUT)
+# gives a hard, predictable ceiling regardless of that internal accounting -
+# without it, a single slow-to-connect device's first update during config
+# entry setup can run long enough for Home Assistant to cancel the whole
+# entry's setup outright, not just fail that one reading.
+CONNECT_TIMEOUT: Final = 60
 # Ceiling for the whole OTA data-transfer phase (start command through end
 # command), i.e. after the connection is already established.
 # At OTA_PACKET_PAYLOAD_SIZE=17 bytes/packet and OTA_CHUNK_DELAY=0.02s, even

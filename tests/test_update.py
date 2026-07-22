@@ -93,6 +93,14 @@ async def test_async_setup_entry(
         assert len(entities) == 1
         assert isinstance(entities[0], ATCMiThermometerUpdate)
 
+        # Regression test: update_before_add=True would trigger a second,
+        # fully redundant refresh via CoordinatorEntity.async_update()
+        # synchronously during setup - see the matching test in
+        # test_sensor.py for the full rationale (production bug: this was
+        # slow enough to get a whole config entry's setup cancelled).
+        assert async_add_entities.call_args[0][1:] in ((), (False,))
+        assert async_add_entities.call_args.kwargs.get("update_before_add") is not True
+
 
 class TestATCUpdateCoordinator:
     """Test ATCUpdateCoordinator."""

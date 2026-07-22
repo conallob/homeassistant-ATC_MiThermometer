@@ -20,6 +20,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import (
     CHAR_UUID_OTA,
     CHAR_UUID_SOFTWARE_REVISION,
+    CONNECT_TIMEOUT,
     FIRMWARE_SOURCES,
     MAX_FIRMWARE_SIZE,
     MAX_VERSION_LENGTH,
@@ -307,8 +308,11 @@ class FirmwareManager:
             # BLE failures (busy adapter/proxy, stale cache, etc.) instead of
             # failing on the first attempt like a bare BleakClient().connect()
             # would - see https://github.com/Bluetooth-Devices/bleak-retry-connector
-            client = await establish_connection(
-                BleakClient, ble_device, self.mac_address
+            # CONNECT_TIMEOUT bounds its retries to a predictable ceiling; see
+            # the constant's comment for why that matters.
+            client = await asyncio.wait_for(
+                establish_connection(BleakClient, ble_device, self.mac_address),
+                timeout=CONNECT_TIMEOUT,
             )
             try:
                 _LOGGER.info("Connected to device %s", self.mac_address)
@@ -902,9 +906,12 @@ class FirmwareManager:
             # transient BLE failures instead of failing on the first
             # attempt like a bare BleakClient().connect() would - see
             # https://github.com/Bluetooth-Devices/bleak-retry-connector
+            # CONNECT_TIMEOUT bounds its retries to a predictable ceiling;
+            # see the constant's comment for why that matters.
             try:
-                client = await establish_connection(
-                    BleakClient, ble_device, self.mac_address
+                client = await asyncio.wait_for(
+                    establish_connection(BleakClient, ble_device, self.mac_address),
+                    timeout=CONNECT_TIMEOUT,
                 )
                 try:
                     version = await self._read_version_from_gatt(client)

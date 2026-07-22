@@ -65,12 +65,15 @@ async def async_setup_entry(
         mac_address,
     )
 
-    # Fetch initial data
+    # Fetch initial data. update_before_add is deliberately omitted below -
+    # see the matching comment in sensor.py's async_setup_entry for why:
+    # it would trigger a second, redundant refresh synchronously during
+    # setup, which for a slow-to-connect device can block platform setup
+    # long enough for Home Assistant to cancel the whole config entry setup.
     await coordinator.async_config_entry_first_refresh()
 
     async_add_entities(
-        [ATCMiThermometerUpdate(coordinator, entry, firmware_manager, bthome_device)],
-        True,
+        [ATCMiThermometerUpdate(coordinator, entry, firmware_manager, bthome_device)]
     )
 
 
