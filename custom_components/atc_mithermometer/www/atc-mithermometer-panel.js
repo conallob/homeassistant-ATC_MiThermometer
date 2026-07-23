@@ -86,6 +86,44 @@ class AtcMithermometerPanel extends HTMLElement {
     const entities = this._hass.entities || {};
     const devices = this._hass.devices || {};
     const states = this._hass.states || {};
+
+    // hass.entities/hass.devices are only rebuilt by Home Assistant's
+    // frontend when the entity/device registry itself changes (add,
+    // remove, rename) - not on every state tick, which is the vast
+    // majority of hass updates on a large instance with many entities.
+    // When neither reference has changed since last time, no device can
+    // have been added, removed, or renamed, so skip the O(n) scan over
+    // every entity in the instance and just recheck the (small) set of
+    // already-known devices for a firmware_source change - the one thing
+    // that can still drift without a registry change (e.g. reconfiguring
+    // the source in another tab).
+    if (
+      this._devicesScanned &&
+      entities === this._lastEntities &&
+      devices === this._lastDevices
+    ) {
+      let changed = false;
+      for (const device of this._devices) {
+        const state = states[device.entityId];
+        const firmwareSource =
+          (state && state.attributes && state.attributes.firmware_source) ||
+          "pvvx";
+        if (firmwareSource !== device.firmwareSource) {
+          device.firmwareSource = firmwareSource;
+          changed = true;
+        }
+      }
+      if (changed) {
+        this._deviceFingerprint = this._fingerprintDevices();
+      }
+      this._devicesChanged = changed;
+      return;
+    }
+
+    this._devicesScanned = true;
+    this._lastEntities = entities;
+    this._lastDevices = devices;
+
     const byDevice = new Map();
 
     for (const entityId of Object.keys(states)) {
@@ -104,6 +142,7 @@ class AtcMithermometerPanel extends HTMLElement {
 
       byDevice.set(entry.device_id, {
         deviceId: entry.device_id,
+        entityId,
         name,
         firmwareSource,
       });
@@ -113,9 +152,7 @@ class AtcMithermometerPanel extends HTMLElement {
       a.name.localeCompare(b.name)
     );
 
-    const fingerprint = this._devices
-      .map((d) => `${d.deviceId}:${d.name}:${d.firmwareSource}`)
-      .join("|");
+    const fingerprint = this._fingerprintDevices();
     this._devicesChanged = fingerprint !== this._deviceFingerprint;
     this._deviceFingerprint = fingerprint;
 
@@ -127,6 +164,12 @@ class AtcMithermometerPanel extends HTMLElement {
       this._selectedDeviceId = this._devices[0].deviceId;
       this._selectedSource = this._devices[0].firmwareSource;
     }
+  }
+
+  _fingerprintDevices() {
+    return this._devices
+      .map((d) => `${d.deviceId}:${d.name}:${d.firmwareSource}`)
+      .join("|");
   }
 
   // ---------------------------------------------------------------------
@@ -278,6 +321,19 @@ class AtcMithermometerPanel extends HTMLElement {
     select.value = stillValid ? previousValue : this._selectedDeviceId;
 
     if (!stillValid) {
+      this._sourceSelect.value = this._selectedSource;
+      this._loadVersions();
+      return;
+    }
+
+    // The selected device is still in the list, but _devicesChanged means
+    // *something* about the device set changed - if that was this device's
+    // configured firmware_source (e.g. reconfigured in another tab while
+    // this dashboard stayed open), the flavour dropdown must follow it.
+    // Otherwise a stale _selectedSource would get sent to apply_firmware.
+    const current = this._devices.find((d) => d.deviceId === previousValue);
+    if (current && current.firmwareSource !== this._selectedSource) {
+      this._selectedSource = current.firmwareSource;
       this._sourceSelect.value = this._selectedSource;
       this._loadVersions();
     }

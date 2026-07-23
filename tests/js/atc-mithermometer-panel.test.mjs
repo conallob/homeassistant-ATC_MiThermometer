@@ -112,6 +112,75 @@ test("preserves the selected device across hass updates when the device list is 
   assert.equal(card._deviceSelect.value, "dev-b");
 });
 
+test("resyncs the flavour dropdown when the selected device's firmware_source changes without a registry change", () => {
+  const card = makeCard();
+  global.fetch = async () => ({ ok: true, status: 200, json: async () => [] });
+
+  // Same entities/devices object references across both hass assignments -
+  // simulates a state-only update (e.g. the config entry's firmware
+  // source was changed in another tab) rather than a registry change.
+  const entities = {
+    "update.device_a": { platform: "atc_mithermometer", device_id: "dev-a" },
+  };
+  const devices = { "dev-a": { name: "Bedroom" } };
+
+  card.hass = makeHass({
+    states: { "update.device_a": { attributes: { firmware_source: "pvvx" } } },
+    entities,
+    devices,
+  });
+  assert.equal(card._selectedSource, "pvvx");
+  assert.equal(card._sourceSelect.value, "pvvx");
+
+  card.hass = makeHass({
+    states: {
+      "update.device_a": { attributes: { firmware_source: "atc1441" } },
+    },
+    entities,
+    devices,
+  });
+
+  assert.equal(card._selectedSource, "atc1441");
+  assert.equal(card._sourceSelect.value, "atc1441");
+});
+
+test("skips the full entity scan when hass.entities/hass.devices are unchanged", () => {
+  const card = makeCard();
+  global.fetch = async () => ({ ok: true, status: 200, json: async () => [] });
+
+  const entities = {
+    "update.device_a": { platform: "atc_mithermometer", device_id: "dev-a" },
+  };
+  const devices = { "dev-a": { name: "Bedroom" } };
+
+  let ownKeysCalls = 0;
+  function makeStates(firmwareSource) {
+    const raw = {
+      "update.device_a": { attributes: { firmware_source: firmwareSource } },
+    };
+    return new Proxy(raw, {
+      ownKeys(target) {
+        ownKeysCalls += 1;
+        return Reflect.ownKeys(target);
+      },
+    });
+  }
+
+  card.hass = makeHass({ states: makeStates("pvvx"), entities, devices });
+  assert.ok(ownKeysCalls > 0, "the first render must scan every entity");
+
+  // Same entities/devices references (no registry change) - the O(n) scan
+  // over every entity in the instance must not run again, only a cheap
+  // lookup of the already-known device's own state.
+  ownKeysCalls = 0;
+  card.hass = makeHass({ states: makeStates("pvvx"), entities, devices });
+  assert.equal(
+    ownKeysCalls,
+    0,
+    "unchanged entities/devices must skip the full states scan"
+  );
+});
+
 test("_loadVersions excludes prereleases and drafts from the dropdown", async () => {
   const card = makeCard();
   card.hass = makeHass({
