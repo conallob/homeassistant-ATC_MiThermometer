@@ -236,3 +236,104 @@ test("_applyFirmware surfaces a failed service call as a status error", async ()
   assert.equal(card._statusIsError, true);
   assert.equal(card._busy, false);
 });
+
+test("implements the standard Lovelace card lifecycle methods", () => {
+  const card = makeCard();
+  card.hass = makeHass();
+
+  card.setConfig({ some: "config" });
+  assert.deepEqual(card._config, { some: "config" });
+  card.setConfig();
+  assert.deepEqual(card._config, {});
+
+  const PanelClass = customElements.get("atc-mithermometer-panel");
+  assert.deepEqual(PanelClass.getStubConfig(), {});
+  assert.equal(card.getCardSize(), 4);
+  assert.equal(card.hass, card._hass);
+});
+
+test("switching the firmware flavour dropdown reloads versions for that source", () => {
+  const card = makeCard();
+  let fetchedUrls = [];
+  global.fetch = async (url) => {
+    fetchedUrls.push(url);
+    return { ok: true, status: 200, json: async () => [] };
+  };
+
+  card.hass = makeHass({
+    states: { "update.device_a": { attributes: { firmware_source: "pvvx" } } },
+    entities: {
+      "update.device_a": { platform: "atc_mithermometer", device_id: "dev-a" },
+    },
+    devices: { "dev-a": { name: "Bedroom" } },
+  });
+
+  fetchedUrls = [];
+  card._sourceSelect.value = "atc1441";
+  card._sourceSelect.dispatchEvent(new window.Event("change"));
+
+  assert.equal(card._selectedSource, "atc1441");
+  assert.ok(fetchedUrls.some((url) => url.includes("atc1441/ATC_MiThermometer")));
+});
+
+test("picking a version from the dropdown updates the selected version", () => {
+  const card = makeCard();
+  global.fetch = async () => ({ ok: true, status: 200, json: async () => [] });
+  card.hass = makeHass({
+    states: { "update.device_a": { attributes: { firmware_source: "pvvx" } } },
+    entities: {
+      "update.device_a": { platform: "atc_mithermometer", device_id: "dev-a" },
+    },
+    devices: { "dev-a": { name: "Bedroom" } },
+  });
+
+  const option = document.createElement("option");
+  option.value = "v9.9";
+  card._versionSelect.appendChild(option);
+  card._versionSelect.value = "v9.9";
+  card._versionSelect.dispatchEvent(new window.Event("change"));
+
+  assert.equal(card._selectedVersion, "v9.9");
+});
+
+test("_loadVersions skips refetching when already cached for the same device+source", async () => {
+  const card = makeCard();
+  let calls = 0;
+  global.fetch = async () => {
+    calls += 1;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => [{ tag_name: "v1.0", prerelease: false, draft: false }],
+    };
+  };
+
+  // No devices yet, so this first render can't auto-select one and fire its
+  // own _loadVersions() - keeps this test's fetch count solely about the
+  // two explicit calls below.
+  card.hass = makeHass();
+
+  card._selectedDeviceId = "dev-a";
+  card._selectedSource = "pvvx";
+  await card._loadVersions();
+  assert.equal(calls, 1);
+
+  // Same device/source key - must reuse the cached result, not refetch.
+  await card._loadVersions();
+  assert.equal(calls, 1);
+});
+
+test("_applyFirmware is a no-op with nothing selected", async () => {
+  const card = makeCard();
+  let called = false;
+  card.hass = makeHass({
+    callService: async () => {
+      called = true;
+    },
+  });
+
+  await card._applyFirmware();
+
+  assert.equal(called, false);
+  assert.equal(card._busy, false);
+});
