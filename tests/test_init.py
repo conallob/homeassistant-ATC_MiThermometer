@@ -1,6 +1,8 @@
 """Test the __init__ module."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+import asyncio
+from dataclasses import dataclass
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntry
@@ -24,6 +26,7 @@ from custom_components.atc_mithermometer.const import (
     CONF_FIRMWARE_SOURCE,
     CONF_MAC_ADDRESS,
     DOMAIN,
+    FIRMWARE_SOURCE_ATC1441,
     FIRMWARE_SOURCE_PVVX,
     SERVICE_UUID_ENVIRONMENTAL,
 )
@@ -113,12 +116,15 @@ async def test_async_setup_entry(hass: HomeAssistant):
     )
     entry.add_to_hass(hass)
 
+    mock_http = MagicMock(spec=["register_static_path"])
+
     with (
         patch(
             "custom_components.atc_mithermometer.get_bthome_device_by_mac",
             return_value=None,
         ),
         patch.object(hass.config_entries, "async_forward_entry_setups") as mock_forward,
+        patch.object(hass, "http", mock_http),
     ):
         result = await async_setup_entry(hass, entry)
 
@@ -135,6 +141,118 @@ async def test_async_setup_entry(hass: HomeAssistant):
 
         # Verify platforms were set up
         mock_forward.assert_called_once_with(entry, [Platform.SENSOR, Platform.UPDATE])
+
+        # On HA versions without async_register_static_paths (removed as of
+        # 2025.7, deprecated since 2024.7), the older sync API must be used.
+        mock_http.register_static_path.assert_called_once_with(
+            f"/{DOMAIN}_files", ANY, cache_headers=False
+        )
+
+
+async def test_async_setup_entry_uses_async_static_path_api_when_available(
+    hass: HomeAssistant,
+):
+    """On HA versions with async_register_static_paths (>= 2024.7), that
+    async API must be used instead of the removed/deprecated sync one.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_MAC_ADDRESS: "AA:BB:CC:DD:EE:FF",
+            CONF_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
+        },
+    )
+    entry.add_to_hass(hass)
+
+    mock_http = MagicMock(spec=["async_register_static_paths"])
+    mock_http.async_register_static_paths = AsyncMock()
+
+    @dataclass
+    class FakeStaticPathConfig:
+        url_path: str
+        path: str
+        cache_headers: bool = True
+
+    with (
+        patch(
+            "custom_components.atc_mithermometer.get_bthome_device_by_mac",
+            return_value=None,
+        ),
+        patch.object(hass.config_entries, "async_forward_entry_setups"),
+        patch.object(hass, "http", mock_http),
+        patch(
+            "custom_components.atc_mithermometer.StaticPathConfig",
+            FakeStaticPathConfig,
+        ),
+    ):
+        result = await async_setup_entry(hass, entry)
+
+    assert result is True
+    mock_http.async_register_static_paths.assert_called_once()
+    configs = mock_http.async_register_static_paths.call_args[0][0]
+    assert len(configs) == 1
+    assert configs[0].url_path == f"/{DOMAIN}_files"
+    assert configs[0].cache_headers is False
+
+
+async def test_async_setup_entry_concurrent_entries_register_frontend_once(
+    hass: HomeAssistant,
+):
+    """Two config entries (e.g. two devices) set up concurrently - normal at
+    HA startup - must only register the static path once. Registering the
+    same url_path twice raises, unlike the idempotent service registration.
+    """
+    entry_a = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_MAC_ADDRESS: "AA:BB:CC:DD:EE:FF",
+            CONF_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
+        },
+    )
+    entry_b = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_MAC_ADDRESS: "11:22:33:44:55:66",
+            CONF_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
+        },
+    )
+    entry_a.add_to_hass(hass)
+    entry_b.add_to_hass(hass)
+
+    mock_http = MagicMock(spec=["async_register_static_paths"])
+
+    async def _slow_register(_configs):
+        # Yield control so both setups can race past the "not yet
+        # registered" check before either sets the flag, if unguarded.
+        await asyncio.sleep(0)
+
+    mock_http.async_register_static_paths = AsyncMock(side_effect=_slow_register)
+
+    @dataclass
+    class FakeStaticPathConfig:
+        url_path: str
+        path: str
+        cache_headers: bool = True
+
+    with (
+        patch(
+            "custom_components.atc_mithermometer.get_bthome_device_by_mac",
+            return_value=None,
+        ),
+        patch.object(hass.config_entries, "async_forward_entry_setups"),
+        patch.object(hass, "http", mock_http),
+        patch(
+            "custom_components.atc_mithermometer.StaticPathConfig",
+            FakeStaticPathConfig,
+        ),
+    ):
+        results = await asyncio.gather(
+            async_setup_entry(hass, entry_a),
+            async_setup_entry(hass, entry_b),
+        )
+
+    assert results == [True, True]
+    mock_http.async_register_static_paths.assert_called_once()
 
 
 async def test_async_setup_entry_links_to_bthome_device(hass: HomeAssistant):
@@ -164,6 +282,7 @@ async def test_async_setup_entry_links_to_bthome_device(hass: HomeAssistant):
             return_value=mock_device_registry,
         ),
         patch.object(hass.config_entries, "async_forward_entry_setups"),
+        patch.object(hass, "http", MagicMock(spec=["register_static_path"])),
     ):
         result = await async_setup_entry(hass, entry)
 
@@ -202,6 +321,7 @@ async def test_async_setup_entry_handles_device_link_error(hass: HomeAssistant):
             return_value=mock_device_registry,
         ),
         patch.object(hass.config_entries, "async_forward_entry_setups"),
+        patch.object(hass, "http", MagicMock(spec=["register_static_path"])),
     ):
         # Should not raise, continues setup
         result = await async_setup_entry(hass, entry)
@@ -776,3 +896,83 @@ class TestApplyFirmwareService:
         mock_firmware_manager.apply_firmware_update.assert_called_once()
         call_args = mock_firmware_manager.apply_firmware_update.call_args
         assert call_args[0][0].version == "v5.8"
+
+    async def test_firmware_source_override_takes_precedence(
+        self,
+        hass: HomeAssistant,
+        mock_call,
+        mock_device,
+        mock_config_entry,
+        mock_firmware_manager,
+    ):
+        """An explicit firmware_source in the call overrides the device's
+        configured default (e.g. from the firmware panel), without changing
+        the device's permanent configuration.
+        """
+        mock_call.data = {
+            "device_id": "device_1",
+            "desired_version": "v5.8",
+            "firmware_source": FIRMWARE_SOURCE_ATC1441,
+        }
+
+        mock_device_registry = MagicMock()
+        mock_device_registry.async_get = MagicMock(return_value=mock_device)
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.dr.async_get",
+                return_value=mock_device_registry,
+            ),
+            patch.object(
+                hass.config_entries,
+                "async_get_entry",
+                return_value=mock_config_entry,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.FirmwareManager",
+                return_value=mock_firmware_manager,
+            ),
+        ):
+            await _async_apply_firmware(hass, mock_call)
+
+        mock_firmware_manager.get_release_by_version.assert_called_once_with(
+            FIRMWARE_SOURCE_ATC1441, "v5.8"
+        )
+        assert mock_config_entry.data[CONF_FIRMWARE_SOURCE] == FIRMWARE_SOURCE_PVVX
+
+    async def test_firmware_source_defaults_to_config_entry(
+        self,
+        hass: HomeAssistant,
+        mock_call,
+        mock_device,
+        mock_config_entry,
+        mock_firmware_manager,
+    ):
+        """Omitting firmware_source falls back to the device's configured
+        default, preserving the previous behavior.
+        """
+        assert "firmware_source" not in mock_call.data
+
+        mock_device_registry = MagicMock()
+        mock_device_registry.async_get = MagicMock(return_value=mock_device)
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.dr.async_get",
+                return_value=mock_device_registry,
+            ),
+            patch.object(
+                hass.config_entries,
+                "async_get_entry",
+                return_value=mock_config_entry,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.FirmwareManager",
+                return_value=mock_firmware_manager,
+            ),
+        ):
+            await _async_apply_firmware(hass, mock_call)
+
+        mock_firmware_manager.get_release_by_version.assert_called_once_with(
+            FIRMWARE_SOURCE_PVVX, "v5.8"
+        )

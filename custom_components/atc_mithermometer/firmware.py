@@ -8,6 +8,7 @@ import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from urllib.parse import quote
 
 import aiohttp
 from bleak import BleakClient, BleakError
@@ -507,8 +508,14 @@ class FirmwareManager:
         repo = source_info["repo"]
         asset_pattern = source_info["asset_pattern"]
 
-        # Build URL for specific release tag
-        api_url = f"https://api.github.com/repos/{repo}/releases/tags/{version}"
+        # Build URL for specific release tag. desired_version comes from the
+        # apply_firmware service call with no format restriction, so encode
+        # it rather than interpolating it into the path raw.
+        api_url = (
+            f"https://api.github.com/repos/{repo}/releases/tags/"
+            f"{quote(version, safe='')}"
+        )
+        _LOGGER.debug("Checking for release: GET %s", api_url)
 
         # For specific version lookup, we need to handle 404 specially
         # so we can't use the generic _fetch_github_api helper
@@ -518,7 +525,14 @@ class FirmwareManager:
                     api_url, timeout=aiohttp.ClientTimeout(total=30)
                 ) as response:
                     if response.status == 404:
-                        _LOGGER.warning("Version %s not found for %s", version, repo)
+                        response_body = await response.text()
+                        _LOGGER.warning(
+                            "Version %s not found for %s (GET %s -> 404: %s)",
+                            version,
+                            repo,
+                            api_url,
+                            response_body[:500],
+                        )
                         return None
 
                     # Handle rate limiting with exponential backoff

@@ -1,3 +1,7 @@
+# Node.js (JS test/lint tooling for the Lovelace card)
+node_modules/
+coverage/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

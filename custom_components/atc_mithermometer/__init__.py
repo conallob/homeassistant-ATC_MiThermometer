@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
 from typing import Any
 
 import voluptuous as vol
@@ -26,6 +28,12 @@ from .const import (
 )
 from .firmware import FirmwareManager
 
+try:
+    # Only present on HA >= 2024.7; used for async_register_static_paths.
+    from homeassistant.components.http import StaticPathConfig
+except ImportError:  # HA < 2024.7
+    StaticPathConfig = None  # type: ignore[assignment,misc]
+
 _LOGGER = logging.getLogger(__name__)
 
 # BTHome integration domain - used to link devices
@@ -36,6 +44,11 @@ BTHOME_DOMAIN = "bthome"
 SERVICE_APPLY_FIRMWARE = "apply_firmware"
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.UPDATE]
+
+# Where the companion Lovelace card (atc-mithermometer-panel.js) is served
+# from. Users add this exact path as a Lovelace JavaScript module resource.
+FRONTEND_URL_PATH = f"/{DOMAIN}_files"
+WWW_PATH = os.path.join(os.path.dirname(__file__), "www")
 
 
 def _versions_equal(version1: str, version2: str) -> bool:
@@ -147,9 +160,46 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 {
                     vol.Required("device_id"): str,
                     vol.Required("desired_version"): str,
+                    vol.Optional("firmware_source"): vol.In(FIRMWARE_SOURCES.keys()),
                 }
             ),
         )
+
+    # Serve the companion Lovelace card (only once for the domain). Users
+    # add FRONTEND_URL_PATH + "/atc-mithermometer-panel.js" as a Lovelace
+    # JavaScript module resource to use it - this only makes the file
+    # servable, it doesn't register it as a resource automatically.
+    # This flag is never cleared in async_unload_entry: it's a global HTTP
+    # route, not per-entry state, and re-registering a stale route after the
+    # last entry is removed would just be a dangling (harmless, 404-only)
+    # path, not a bug worth tracking here.
+    #
+    # Unlike the service registration above, the static-path calls below
+    # aren't idempotent (registering the same url_path twice raises), and
+    # the async branch awaits before the flag is set - so two config entries
+    # setting up concurrently (normal at HA startup) could both pass the
+    # check before either sets the flag. A lock serializes that.
+    hass.data[DOMAIN].setdefault("_frontend_lock", asyncio.Lock())
+    async with hass.data[DOMAIN]["_frontend_lock"]:
+        if not hass.data[DOMAIN].get("_frontend_registered"):
+            if StaticPathConfig is not None and hasattr(
+                hass.http, "async_register_static_paths"
+            ):
+                # HA >= 2024.7: register_static_path was deprecated then
+                # removed (fully gone as of 2025.7), in favor of this async
+                # form.
+                await hass.http.async_register_static_paths(
+                    [StaticPathConfig(FRONTEND_URL_PATH, WWW_PATH, cache_headers=False)]
+                )
+            else:
+                # HA < 2024.7 (down to hacs.json's declared minimum, 2023.1 -
+                # custom integrations can't enforce a minimum HA version via
+                # manifest.json, only HACS's own hacs.json gate) never had
+                # the async form, only this sync one.
+                hass.http.register_static_path(
+                    FRONTEND_URL_PATH, WWW_PATH, cache_headers=False
+                )
+            hass.data[DOMAIN]["_frontend_registered"] = True
 
     return True
 
@@ -222,8 +272,12 @@ async def _async_apply_firmware(hass: HomeAssistant, call: ServiceCall) -> None:
         )
         return
 
-    # Get firmware source from config
-    firmware_source = config_entry.data[CONF_FIRMWARE_SOURCE]
+    # Firmware source defaults to whatever this device is configured for, but
+    # can be overridden per-call (e.g. from the firmware panel) to flash the
+    # other fork without changing the device's permanent configuration.
+    firmware_source = call.data.get(
+        "firmware_source", config_entry.data[CONF_FIRMWARE_SOURCE]
+    )
 
     # Validate firmware source
     if firmware_source not in FIRMWARE_SOURCES:

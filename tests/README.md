@@ -13,8 +13,26 @@ tests/
 ├── test_init.py             # Tests for integration setup
 ├── test_config_flow.py      # Tests for configuration flow
 ├── test_firmware.py         # Tests for firmware management
-└── test_update.py           # Tests for update entity
+├── test_update.py           # Tests for update entity
+└── js/                      # Node-based tests for the Lovelace card
+    └── atc-mithermometer-panel.test.mjs
 ```
+
+The `js/` directory tests the companion Lovelace card
+(`custom_components/atc_mithermometer/www/atc-mithermometer-panel.js`) using
+Node's built-in test runner and jsdom - see the project root's `package.json`.
+The card itself still ships with no build step or dependencies; this tooling
+is dev/CI-only.
+
+```bash
+npm ci
+npm test               # run the JS tests
+npm run test:coverage  # run the JS tests with an lcov coverage report (coverage/lcov.info)
+npm run lint           # lint the JS with eslint
+```
+
+CI uploads `coverage/lcov.info` to Codecov under the `javascript` flag, alongside
+the Python coverage uploaded under `unittests`.
 
 ## Running Tests
 

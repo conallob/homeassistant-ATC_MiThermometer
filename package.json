@@ -1,0 +1,18 @@
+{
+  "name": "atc-mithermometer-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Test/lint tooling for the ATC MiThermometer Lovelace card (the shipped card itself has no build step or dependencies).",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/js/*.test.mjs",
+    "test:coverage": "mkdir -p coverage && node --test --experimental-test-coverage --test-coverage-include=\"custom_components/atc_mithermometer/www/**/*.js\" --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info tests/js/*.test.mjs",
+    "lint": "eslint custom_components/atc_mithermometer/www tests/js eslint.config.js"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.7.0",
+    "globals": "^17.7.0",
+    "jsdom": "^29.1.1"
+  }
+}

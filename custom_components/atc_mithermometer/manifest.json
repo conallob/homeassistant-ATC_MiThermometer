@@ -14,7 +14,8 @@
   ],
   "config_flow": true,
   "dependencies": [
-    "bluetooth"
+    "bluetooth",
+    "http"
   ],
   "documentation": "https://github.com/conallob/homeassistant-ATC_MiThermometer",
   "iot_class": "local_polling",

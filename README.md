@@ -65,16 +65,46 @@ The integration automatically checks for firmware updates every hour. When an up
 
 ### Manual Firmware Flash
 
-You can also use the service calls to manually trigger firmware updates:
+You can also call the `apply_firmware` service to manually trigger a firmware update:
 
 ```yaml
-service: atc_mithermometer.flash_firmware
-target:
-  device_id: your_device_id
+service: atc_mithermometer.apply_firmware
 data:
-  firmware_source: pvvx  # or atc1441
-  version: v4.5  # optional, defaults to latest
+  device_id: your_device_id
+  desired_version: v4.5
+  firmware_source: pvvx  # optional, defaults to the device's configured source
 ```
+
+### Firmware Panel (Custom Lovelace Card)
+
+For a friendlier way to trigger updates than Developer Tools → Actions, this
+integration ships a companion Lovelace card that lets you pick a device,
+firmware flavour, and version (populated from that flavour's real GitHub
+releases) and apply it with one click.
+
+1. Go to **Settings** → **Dashboards** → **Resources** (you may need to enable
+   **Advanced Mode** in your user profile to see this menu)
+2. Click **Add Resource**
+3. Set the URL to `/atc_mithermometer_files/atc-mithermometer-panel.js`
+4. Set the resource type to **JavaScript Module**
+5. Click **Create**, then reload your browser
+
+Then add the card to any dashboard, either through the card picker (search
+for "ATC MiThermometer Firmware Panel") or by adding it directly in YAML:
+
+```yaml
+type: custom:atc-mithermometer-panel
+```
+
+**Known limitation**: the panel's version dropdown fetches releases directly
+from `api.github.com` in your browser, unauthenticated - separately from, and
+subject to a different budget than, the backend's own GitHub requests. GitHub
+caps unauthenticated requests at 60/hour *per source IP*, shared by everyone
+behind that IP (e.g. your whole household). If you have several people or
+browser tabs opening this card in a short window, the dropdown may
+intermittently show "Could not load versions" until the limit resets. This
+doesn't affect the backend's own update checks or firmware flashing, only the
+panel's version list.
 
 ### Switching Firmware Sources
 
