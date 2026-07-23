@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/js/*.test.mjs",
+    "test:coverage": "mkdir -p coverage && node --test --experimental-test-coverage --test-coverage-include=\"custom_components/atc_mithermometer/www/**/*.js\" --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info tests/js/*.test.mjs",
     "lint": "eslint custom_components/atc_mithermometer/www tests/js eslint.config.js"
   },
   "devDependencies": {

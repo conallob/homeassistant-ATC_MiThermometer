@@ -26,9 +26,13 @@ is dev/CI-only.
 
 ```bash
 npm ci
-npm test        # run the JS tests
-npm run lint    # lint the JS with eslint
+npm test               # run the JS tests
+npm run test:coverage  # run the JS tests with an lcov coverage report (coverage/lcov.info)
+npm run lint           # lint the JS with eslint
 ```
+
+CI uploads `coverage/lcov.info` to Codecov under the `javascript` flag, alongside
+the Python coverage uploaded under `unittests`.
 
 ## Running Tests
 

@@ -108,8 +108,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run JS tests
-        run: npm test
+      - name: Run JS tests with coverage
+        run: npm run test:coverage
+
+      - name: Upload JS coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage/lcov.info
+          flags: javascript
+          name: codecov-umbrella
+          fail_ci_if_error: false
 
   js-lint:
     runs-on: ubuntu-latest
