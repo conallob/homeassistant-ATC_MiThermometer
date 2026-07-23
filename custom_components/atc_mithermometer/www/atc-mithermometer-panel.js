@@ -309,6 +309,11 @@ class AtcMithermometerPanel extends HTMLElement {
       return;
     }
 
+    // Guards against a slower, now-stale request resolving after a newer
+    // one (e.g. the user switches device/source twice in quick succession)
+    // and clobbering the dropdown with results for the wrong selection.
+    const requestId = (this._versionsRequestId = (this._versionsRequestId || 0) + 1);
+
     this._versionsLoading = true;
     this._versionsError = "";
     this._versionSelect.innerHTML = "<option>Loading...</option>";
@@ -323,17 +328,21 @@ class AtcMithermometerPanel extends HTMLElement {
         throw new Error(`GitHub API returned HTTP ${response.status}`);
       }
       const releases = await response.json();
+      if (requestId !== this._versionsRequestId) return;
       this._versions = releases
         .map((release) => release.tag_name)
         .filter(Boolean);
       this._versionsForKey = key;
     } catch (err) {
+      if (requestId !== this._versionsRequestId) return;
       this._versions = [];
       this._versionsError = `Could not load versions: ${err.message}`;
     } finally {
-      this._versionsLoading = false;
-      this._renderVersionOptions();
-      this._syncControlsEnabled();
+      if (requestId === this._versionsRequestId) {
+        this._versionsLoading = false;
+        this._renderVersionOptions();
+        this._syncControlsEnabled();
+      }
     }
   }
 

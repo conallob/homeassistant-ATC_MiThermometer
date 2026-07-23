@@ -168,6 +168,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # add FRONTEND_URL_PATH + "/atc-mithermometer-panel.js" as a Lovelace
     # JavaScript module resource to use it - this only makes the file
     # servable, it doesn't register it as a resource automatically.
+    # This flag is never cleared in async_unload_entry: it's a global HTTP
+    # route, not per-entry state, and re-registering a stale route after the
+    # last entry is removed would just be a dangling (harmless, 404-only)
+    # path, not a bug worth tracking here.
     if not hass.data[DOMAIN].get("_frontend_registered"):
         if StaticPathConfig is not None and hasattr(
             hass.http, "async_register_static_paths"
