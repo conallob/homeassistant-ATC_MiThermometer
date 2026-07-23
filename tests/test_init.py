@@ -1,6 +1,7 @@
 """Test the __init__ module."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from dataclasses import dataclass
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntry
@@ -114,13 +115,15 @@ async def test_async_setup_entry(hass: HomeAssistant):
     )
     entry.add_to_hass(hass)
 
+    mock_http = MagicMock(spec=["register_static_path"])
+
     with (
         patch(
             "custom_components.atc_mithermometer.get_bthome_device_by_mac",
             return_value=None,
         ),
         patch.object(hass.config_entries, "async_forward_entry_setups") as mock_forward,
-        patch.object(hass, "http", MagicMock()),
+        patch.object(hass, "http", mock_http),
     ):
         result = await async_setup_entry(hass, entry)
 
@@ -137,6 +140,58 @@ async def test_async_setup_entry(hass: HomeAssistant):
 
         # Verify platforms were set up
         mock_forward.assert_called_once_with(entry, [Platform.SENSOR, Platform.UPDATE])
+
+        # On HA versions without async_register_static_paths (removed as of
+        # 2025.7, deprecated since 2024.7), the older sync API must be used.
+        mock_http.register_static_path.assert_called_once_with(
+            f"/{DOMAIN}_files", ANY, cache_headers=False
+        )
+
+
+async def test_async_setup_entry_uses_async_static_path_api_when_available(
+    hass: HomeAssistant,
+):
+    """On HA versions with async_register_static_paths (>= 2024.7), that
+    async API must be used instead of the removed/deprecated sync one.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_MAC_ADDRESS: "AA:BB:CC:DD:EE:FF",
+            CONF_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
+        },
+    )
+    entry.add_to_hass(hass)
+
+    mock_http = MagicMock(spec=["async_register_static_paths"])
+    mock_http.async_register_static_paths = AsyncMock()
+
+    @dataclass
+    class FakeStaticPathConfig:
+        url_path: str
+        path: str
+        cache_headers: bool = True
+
+    with (
+        patch(
+            "custom_components.atc_mithermometer.get_bthome_device_by_mac",
+            return_value=None,
+        ),
+        patch.object(hass.config_entries, "async_forward_entry_setups"),
+        patch.object(hass, "http", mock_http),
+        patch(
+            "custom_components.atc_mithermometer.StaticPathConfig",
+            FakeStaticPathConfig,
+        ),
+    ):
+        result = await async_setup_entry(hass, entry)
+
+    assert result is True
+    mock_http.async_register_static_paths.assert_called_once()
+    configs = mock_http.async_register_static_paths.call_args[0][0]
+    assert len(configs) == 1
+    assert configs[0].url_path == f"/{DOMAIN}_files"
+    assert configs[0].cache_headers is False
 
 
 async def test_async_setup_entry_links_to_bthome_device(hass: HomeAssistant):
@@ -166,7 +221,7 @@ async def test_async_setup_entry_links_to_bthome_device(hass: HomeAssistant):
             return_value=mock_device_registry,
         ),
         patch.object(hass.config_entries, "async_forward_entry_setups"),
-        patch.object(hass, "http", MagicMock()),
+        patch.object(hass, "http", MagicMock(spec=["register_static_path"])),
     ):
         result = await async_setup_entry(hass, entry)
 
@@ -205,7 +260,7 @@ async def test_async_setup_entry_handles_device_link_error(hass: HomeAssistant):
             return_value=mock_device_registry,
         ),
         patch.object(hass.config_entries, "async_forward_entry_setups"),
-        patch.object(hass, "http", MagicMock()),
+        patch.object(hass, "http", MagicMock(spec=["register_static_path"])),
     ):
         # Should not raise, continues setup
         result = await async_setup_entry(hass, entry)

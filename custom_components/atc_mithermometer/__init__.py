@@ -27,6 +27,12 @@ from .const import (
 )
 from .firmware import FirmwareManager
 
+try:
+    # Only present on HA >= 2024.7; used for async_register_static_paths.
+    from homeassistant.components.http import StaticPathConfig
+except ImportError:  # HA < 2024.7
+    StaticPathConfig = None  # type: ignore[assignment,misc]
+
 _LOGGER = logging.getLogger(__name__)
 
 # BTHome integration domain - used to link devices
@@ -163,7 +169,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # JavaScript module resource to use it - this only makes the file
     # servable, it doesn't register it as a resource automatically.
     if not hass.data[DOMAIN].get("_frontend_registered"):
-        hass.http.register_static_path(FRONTEND_URL_PATH, WWW_PATH, cache_headers=False)
+        if StaticPathConfig is not None and hasattr(
+            hass.http, "async_register_static_paths"
+        ):
+            # HA >= 2024.7: register_static_path was deprecated then removed
+            # (fully gone as of 2025.7), in favor of this async form.
+            await hass.http.async_register_static_paths(
+                [StaticPathConfig(FRONTEND_URL_PATH, WWW_PATH, cache_headers=False)]
+            )
+        else:
+            # HA < 2024.7 (down to this integration's declared minimum,
+            # 2023.1) never had the async form, only this sync one.
+            hass.http.register_static_path(
+                FRONTEND_URL_PATH, WWW_PATH, cache_headers=False
+            )
         hass.data[DOMAIN]["_frontend_registered"] = True
 
     return True
