@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Any
@@ -172,22 +173,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # route, not per-entry state, and re-registering a stale route after the
     # last entry is removed would just be a dangling (harmless, 404-only)
     # path, not a bug worth tracking here.
-    if not hass.data[DOMAIN].get("_frontend_registered"):
-        if StaticPathConfig is not None and hasattr(
-            hass.http, "async_register_static_paths"
-        ):
-            # HA >= 2024.7: register_static_path was deprecated then removed
-            # (fully gone as of 2025.7), in favor of this async form.
-            await hass.http.async_register_static_paths(
-                [StaticPathConfig(FRONTEND_URL_PATH, WWW_PATH, cache_headers=False)]
-            )
-        else:
-            # HA < 2024.7 (down to this integration's declared minimum,
-            # 2023.1) never had the async form, only this sync one.
-            hass.http.register_static_path(
-                FRONTEND_URL_PATH, WWW_PATH, cache_headers=False
-            )
-        hass.data[DOMAIN]["_frontend_registered"] = True
+    #
+    # Unlike the service registration above, the static-path calls below
+    # aren't idempotent (registering the same url_path twice raises), and
+    # the async branch awaits before the flag is set - so two config entries
+    # setting up concurrently (normal at HA startup) could both pass the
+    # check before either sets the flag. A lock serializes that.
+    hass.data[DOMAIN].setdefault("_frontend_lock", asyncio.Lock())
+    async with hass.data[DOMAIN]["_frontend_lock"]:
+        if not hass.data[DOMAIN].get("_frontend_registered"):
+            if StaticPathConfig is not None and hasattr(
+                hass.http, "async_register_static_paths"
+            ):
+                # HA >= 2024.7: register_static_path was deprecated then
+                # removed (fully gone as of 2025.7), in favor of this async
+                # form.
+                await hass.http.async_register_static_paths(
+                    [StaticPathConfig(FRONTEND_URL_PATH, WWW_PATH, cache_headers=False)]
+                )
+            else:
+                # HA < 2024.7 (down to hacs.json's declared minimum, 2023.1 -
+                # custom integrations can't enforce a minimum HA version via
+                # manifest.json, only HACS's own hacs.json gate) never had
+                # the async form, only this sync one.
+                hass.http.register_static_path(
+                    FRONTEND_URL_PATH, WWW_PATH, cache_headers=False
+                )
+            hass.data[DOMAIN]["_frontend_registered"] = True
 
     return True
 

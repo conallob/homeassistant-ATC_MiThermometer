@@ -1,5 +1,6 @@
 """Test the __init__ module."""
 
+import asyncio
 from dataclasses import dataclass
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
@@ -192,6 +193,66 @@ async def test_async_setup_entry_uses_async_static_path_api_when_available(
     assert len(configs) == 1
     assert configs[0].url_path == f"/{DOMAIN}_files"
     assert configs[0].cache_headers is False
+
+
+async def test_async_setup_entry_concurrent_entries_register_frontend_once(
+    hass: HomeAssistant,
+):
+    """Two config entries (e.g. two devices) set up concurrently - normal at
+    HA startup - must only register the static path once. Registering the
+    same url_path twice raises, unlike the idempotent service registration.
+    """
+    entry_a = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_MAC_ADDRESS: "AA:BB:CC:DD:EE:FF",
+            CONF_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
+        },
+    )
+    entry_b = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_MAC_ADDRESS: "11:22:33:44:55:66",
+            CONF_FIRMWARE_SOURCE: FIRMWARE_SOURCE_PVVX,
+        },
+    )
+    entry_a.add_to_hass(hass)
+    entry_b.add_to_hass(hass)
+
+    mock_http = MagicMock(spec=["async_register_static_paths"])
+
+    async def _slow_register(_configs):
+        # Yield control so both setups can race past the "not yet
+        # registered" check before either sets the flag, if unguarded.
+        await asyncio.sleep(0)
+
+    mock_http.async_register_static_paths = AsyncMock(side_effect=_slow_register)
+
+    @dataclass
+    class FakeStaticPathConfig:
+        url_path: str
+        path: str
+        cache_headers: bool = True
+
+    with (
+        patch(
+            "custom_components.atc_mithermometer.get_bthome_device_by_mac",
+            return_value=None,
+        ),
+        patch.object(hass.config_entries, "async_forward_entry_setups"),
+        patch.object(hass, "http", mock_http),
+        patch(
+            "custom_components.atc_mithermometer.StaticPathConfig",
+            FakeStaticPathConfig,
+        ),
+    ):
+        results = await asyncio.gather(
+            async_setup_entry(hass, entry_a),
+            async_setup_entry(hass, entry_b),
+        )
+
+    assert results == [True, True]
+    mock_http.async_register_static_paths.assert_called_once()
 
 
 async def test_async_setup_entry_links_to_bthome_device(hass: HomeAssistant):
