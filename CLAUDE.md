@@ -89,3 +89,8 @@ python -m script.hassfest  # Validate integration structure
 - Handle network errors gracefully when fetching firmware from GitHub
 - Firmware flashing is risky - implement confirmation steps and clear user warnings
 - Support both firmware variants (pvvx and atc1441) as they have different feature sets
+- `manifest.json`'s `homeassistant` key (a real HA schema field) only applies to core-bundled
+  integrations - hassfest rejects it on custom integrations with "extra keys not allowed". A
+  custom integration's minimum supported HA version is declared in `hacs.json`'s
+  `homeassistant` field instead, which HACS enforces at install time; it isn't enforced by
+  Home Assistant core itself.
