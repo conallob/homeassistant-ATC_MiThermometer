@@ -1,5 +1,12 @@
 # ATC MiThermometer Manager for Home Assistant
 
+[![Tests](https://github.com/conallob/homeassistant-ATC_MiThermometer/actions/workflows/test.yml/badge.svg)](https://github.com/conallob/homeassistant-ATC_MiThermometer/actions/workflows/test.yml)
+[![Validate](https://github.com/conallob/homeassistant-ATC_MiThermometer/actions/workflows/validate.yml/badge.svg)](https://github.com/conallob/homeassistant-ATC_MiThermometer/actions/workflows/validate.yml)
+[![codecov](https://codecov.io/gh/conallob/homeassistant-ATC_MiThermometer/branch/main/graph/badge.svg)](https://codecov.io/gh/conallob/homeassistant-ATC_MiThermometer)
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
+[![GitHub release](https://img.shields.io/github/v/release/conallob/homeassistant-ATC_MiThermometer)](https://github.com/conallob/homeassistant-ATC_MiThermometer/releases)
+[![License](https://img.shields.io/github/license/conallob/homeassistant-ATC_MiThermometer)](LICENSE)
+
 A Home Assistant integration for managing and updating ATC_MiThermometer custom firmware on Xiaomi Mijia BLE thermometer/hygrometer devices.
 
 ## Features
@@ -22,6 +29,12 @@ A Home Assistant integration for managing and updating ATC_MiThermometer custom 
 ## Installation
 
 ### HACS (Recommended)
+
+Click the button below to add this repository to HACS on your own Home Assistant instance:
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=conallob&repository=homeassistant-ATC_MiThermometer&category=integration)
+
+Or add it manually:
 
 1. Open HACS in Home Assistant
 2. Go to "Integrations"
