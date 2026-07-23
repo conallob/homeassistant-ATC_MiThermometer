@@ -208,6 +208,86 @@ test("_loadVersions excludes prereleases and drafts from the dropdown", async ()
   assert.deepEqual(card._versions, ["v6.0"]);
 });
 
+test("_loadVersions is a no-op with no device selected", async () => {
+  const card = makeCard();
+  card.hass = makeHass();
+
+  let fetchCalled = false;
+  global.fetch = async () => {
+    fetchCalled = true;
+    return { ok: true, status: 200, json: async () => [] };
+  };
+
+  await card._loadVersions();
+
+  assert.equal(fetchCalled, false);
+});
+
+test("_loadVersions surfaces a non-ok HTTP response (e.g. GitHub rate limiting) as a versions error", async () => {
+  const card = makeCard();
+  card.hass = makeHass({
+    states: { "update.device_a": { attributes: { firmware_source: "pvvx" } } },
+    entities: {
+      "update.device_a": { platform: "atc_mithermometer", device_id: "dev-a" },
+    },
+    devices: { "dev-a": { name: "Bedroom" } },
+  });
+
+  global.fetch = async () => ({ ok: false, status: 403 });
+
+  card._selectedDeviceId = "dev-a";
+  card._selectedSource = "pvvx";
+  await card._loadVersions();
+
+  assert.deepEqual(card._versions, []);
+  assert.match(card._versionsError, /HTTP 403/);
+  assert.equal(card._versionSelect.options.length, 1);
+  assert.match(card._versionSelect.options[0].textContent, /HTTP 403/);
+});
+
+test("_loadVersions's error path also respects the stale-request guard", async () => {
+  const card = makeCard();
+  card.hass = makeHass({
+    states: { "update.device_a": { attributes: { firmware_source: "pvvx" } } },
+    entities: {
+      "update.device_a": { platform: "atc_mithermometer", device_id: "dev-a" },
+    },
+    devices: { "dev-a": { name: "Bedroom" } },
+  });
+
+  let calls = 0;
+  global.fetch = async () => {
+    calls += 1;
+    const firstCall = calls === 1;
+    if (firstCall) {
+      // The first (pvvx) request fails, but resolves slower than the
+      // second (atc1441) request, which succeeds - the stale failure
+      // must not clobber the newer, successful selection.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return { ok: false, status: 500 };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => [
+        { tag_name: "atc1441-v1", prerelease: false, draft: false },
+      ],
+    };
+  };
+
+  card._selectedDeviceId = "dev-a";
+  card._selectedSource = "pvvx";
+  const slow = card._loadVersions();
+
+  card._selectedSource = "atc1441";
+  const fast = card._loadVersions();
+
+  await Promise.all([slow, fast]);
+
+  assert.deepEqual(card._versions, ["atc1441-v1"]);
+  assert.equal(card._versionsError, "");
+});
+
 test("_loadVersions guards against a slower stale response clobbering a newer selection", async () => {
   const card = makeCard();
   card.hass = makeHass({
