@@ -329,7 +329,10 @@ class AtcMithermometerPanel extends HTMLElement {
       }
       const releases = await response.json();
       if (requestId !== this._versionsRequestId) return;
+      // Excludes prereleases/drafts, matching the backend's own "latest
+      // version" semantics elsewhere (which uses /releases/latest).
       this._versions = releases
+        .filter((release) => !release.prerelease && !release.draft)
         .map((release) => release.tag_name)
         .filter(Boolean);
       this._versionsForKey = key;
