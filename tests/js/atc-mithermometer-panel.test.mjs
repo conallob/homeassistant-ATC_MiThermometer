@@ -68,6 +68,18 @@ test("discovers only atc_mithermometer update entities, sorted by device name", 
   assert.equal(kitchen.firmwareSource, "pvvx");
 });
 
+test("renders the empty-state placeholder on the very first render with zero devices", () => {
+  const card = makeCard();
+  card.hass = makeHass();
+
+  assert.equal(card._deviceSelect.disabled, true);
+  assert.equal(card._deviceSelect.options.length, 1);
+  assert.match(
+    card._deviceSelect.options[0].textContent,
+    /No ATC MiThermometer devices found/
+  );
+});
+
 test("preserves the selected device across hass updates when the device list is unchanged", () => {
   const card = makeCard();
   global.fetch = async () => ({ ok: true, status: 200, json: async () => [] });

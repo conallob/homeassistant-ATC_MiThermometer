@@ -28,7 +28,11 @@ class AtcMithermometerPanel extends HTMLElement {
     this._hass = null;
     this._built = false;
 
-    this._deviceFingerprint = "";
+    // null (not "") so the very first _refreshDevices() call always counts
+    // as a change, even with zero devices - otherwise a zero-length device
+    // list's fingerprint ("") would match this starting value and the
+    // empty-state placeholder in _syncDeviceOptions() would never render.
+    this._deviceFingerprint = null;
     this._devices = [];
 
     this._selectedDeviceId = null;
