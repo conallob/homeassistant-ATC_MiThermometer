@@ -96,6 +96,16 @@ for "ATC MiThermometer Firmware Panel") or by adding it directly in YAML:
 type: custom:atc-mithermometer-panel
 ```
 
+**Known limitation**: the panel's version dropdown fetches releases directly
+from `api.github.com` in your browser, unauthenticated - separately from, and
+subject to a different budget than, the backend's own GitHub requests. GitHub
+caps unauthenticated requests at 60/hour *per source IP*, shared by everyone
+behind that IP (e.g. your whole household). If you have several people or
+browser tabs opening this card in a short window, the dropdown may
+intermittently show "Could not load versions" until the limit resets. This
+doesn't affect the backend's own update checks or firmware flashing, only the
+panel's version list.
+
 ### Switching Firmware Sources
 
 To switch between pvvx and atc1441 firmware:
