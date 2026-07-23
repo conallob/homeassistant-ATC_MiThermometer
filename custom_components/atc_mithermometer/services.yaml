@@ -35,3 +35,17 @@ apply_firmware:
       example: "v4.5"
       selector:
         text:
+    firmware_source:
+      name: Firmware Source
+      description: >
+        Which firmware fork to fetch desired_version from. Defaults to
+        whichever fork this device is configured for; set this to flash the
+        other fork for a single update without changing that configuration.
+      required: false
+      selector:
+        select:
+          options:
+            - value: pvvx
+              label: pvvx (Most Active)
+            - value: atc1441
+              label: atc1441 (Original)

@@ -509,6 +509,7 @@ class FirmwareManager:
 
         # Build URL for specific release tag
         api_url = f"https://api.github.com/repos/{repo}/releases/tags/{version}"
+        _LOGGER.debug("Checking for release: GET %s", api_url)
 
         # For specific version lookup, we need to handle 404 specially
         # so we can't use the generic _fetch_github_api helper
@@ -518,7 +519,14 @@ class FirmwareManager:
                     api_url, timeout=aiohttp.ClientTimeout(total=30)
                 ) as response:
                     if response.status == 404:
-                        _LOGGER.warning("Version %s not found for %s", version, repo)
+                        response_body = await response.text()
+                        _LOGGER.warning(
+                            "Version %s not found for %s (GET %s -> 404: %s)",
+                            version,
+                            repo,
+                            api_url,
+                            response_body[:500],
+                        )
                         return None
 
                     # Handle rate limiting with exponential backoff

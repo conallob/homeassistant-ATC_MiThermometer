@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 import voluptuous as vol
@@ -36,6 +37,11 @@ BTHOME_DOMAIN = "bthome"
 SERVICE_APPLY_FIRMWARE = "apply_firmware"
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.UPDATE]
+
+# Where the companion Lovelace card (atc-mithermometer-panel.js) is served
+# from. Users add this exact path as a Lovelace JavaScript module resource.
+FRONTEND_URL_PATH = f"/{DOMAIN}_files"
+WWW_PATH = os.path.join(os.path.dirname(__file__), "www")
 
 
 def _versions_equal(version1: str, version2: str) -> bool:
@@ -147,9 +153,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 {
                     vol.Required("device_id"): str,
                     vol.Required("desired_version"): str,
+                    vol.Optional("firmware_source"): vol.In(FIRMWARE_SOURCES.keys()),
                 }
             ),
         )
+
+    # Serve the companion Lovelace card (only once for the domain). Users
+    # add FRONTEND_URL_PATH + "/atc-mithermometer-panel.js" as a Lovelace
+    # JavaScript module resource to use it - this only makes the file
+    # servable, it doesn't register it as a resource automatically.
+    if not hass.data[DOMAIN].get("_frontend_registered"):
+        hass.http.register_static_path(FRONTEND_URL_PATH, WWW_PATH, cache_headers=False)
+        hass.data[DOMAIN]["_frontend_registered"] = True
 
     return True
 
@@ -222,8 +237,12 @@ async def _async_apply_firmware(hass: HomeAssistant, call: ServiceCall) -> None:
         )
         return
 
-    # Get firmware source from config
-    firmware_source = config_entry.data[CONF_FIRMWARE_SOURCE]
+    # Firmware source defaults to whatever this device is configured for, but
+    # can be overridden per-call (e.g. from the firmware panel) to flash the
+    # other fork without changing the device's permanent configuration.
+    firmware_source = call.data.get(
+        "firmware_source", config_entry.data[CONF_FIRMWARE_SOURCE]
+    )
 
     # Validate firmware source
     if firmware_source not in FIRMWARE_SOURCES:

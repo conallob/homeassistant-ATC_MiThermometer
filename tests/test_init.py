@@ -24,6 +24,7 @@ from custom_components.atc_mithermometer.const import (
     CONF_FIRMWARE_SOURCE,
     CONF_MAC_ADDRESS,
     DOMAIN,
+    FIRMWARE_SOURCE_ATC1441,
     FIRMWARE_SOURCE_PVVX,
     SERVICE_UUID_ENVIRONMENTAL,
 )
@@ -119,6 +120,7 @@ async def test_async_setup_entry(hass: HomeAssistant):
             return_value=None,
         ),
         patch.object(hass.config_entries, "async_forward_entry_setups") as mock_forward,
+        patch.object(hass, "http", MagicMock()),
     ):
         result = await async_setup_entry(hass, entry)
 
@@ -164,6 +166,7 @@ async def test_async_setup_entry_links_to_bthome_device(hass: HomeAssistant):
             return_value=mock_device_registry,
         ),
         patch.object(hass.config_entries, "async_forward_entry_setups"),
+        patch.object(hass, "http", MagicMock()),
     ):
         result = await async_setup_entry(hass, entry)
 
@@ -202,6 +205,7 @@ async def test_async_setup_entry_handles_device_link_error(hass: HomeAssistant):
             return_value=mock_device_registry,
         ),
         patch.object(hass.config_entries, "async_forward_entry_setups"),
+        patch.object(hass, "http", MagicMock()),
     ):
         # Should not raise, continues setup
         result = await async_setup_entry(hass, entry)
@@ -776,3 +780,83 @@ class TestApplyFirmwareService:
         mock_firmware_manager.apply_firmware_update.assert_called_once()
         call_args = mock_firmware_manager.apply_firmware_update.call_args
         assert call_args[0][0].version == "v5.8"
+
+    async def test_firmware_source_override_takes_precedence(
+        self,
+        hass: HomeAssistant,
+        mock_call,
+        mock_device,
+        mock_config_entry,
+        mock_firmware_manager,
+    ):
+        """An explicit firmware_source in the call overrides the device's
+        configured default (e.g. from the firmware panel), without changing
+        the device's permanent configuration.
+        """
+        mock_call.data = {
+            "device_id": "device_1",
+            "desired_version": "v5.8",
+            "firmware_source": FIRMWARE_SOURCE_ATC1441,
+        }
+
+        mock_device_registry = MagicMock()
+        mock_device_registry.async_get = MagicMock(return_value=mock_device)
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.dr.async_get",
+                return_value=mock_device_registry,
+            ),
+            patch.object(
+                hass.config_entries,
+                "async_get_entry",
+                return_value=mock_config_entry,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.FirmwareManager",
+                return_value=mock_firmware_manager,
+            ),
+        ):
+            await _async_apply_firmware(hass, mock_call)
+
+        mock_firmware_manager.get_release_by_version.assert_called_once_with(
+            FIRMWARE_SOURCE_ATC1441, "v5.8"
+        )
+        assert mock_config_entry.data[CONF_FIRMWARE_SOURCE] == FIRMWARE_SOURCE_PVVX
+
+    async def test_firmware_source_defaults_to_config_entry(
+        self,
+        hass: HomeAssistant,
+        mock_call,
+        mock_device,
+        mock_config_entry,
+        mock_firmware_manager,
+    ):
+        """Omitting firmware_source falls back to the device's configured
+        default, preserving the previous behavior.
+        """
+        assert "firmware_source" not in mock_call.data
+
+        mock_device_registry = MagicMock()
+        mock_device_registry.async_get = MagicMock(return_value=mock_device)
+
+        with (
+            patch(
+                "custom_components.atc_mithermometer.dr.async_get",
+                return_value=mock_device_registry,
+            ),
+            patch.object(
+                hass.config_entries,
+                "async_get_entry",
+                return_value=mock_config_entry,
+            ),
+            patch(
+                "custom_components.atc_mithermometer.FirmwareManager",
+                return_value=mock_firmware_manager,
+            ),
+        ):
+            await _async_apply_firmware(hass, mock_call)
+
+        mock_firmware_manager.get_release_by_version.assert_called_once_with(
+            FIRMWARE_SOURCE_PVVX, "v5.8"
+        )
