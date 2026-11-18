@@ -45,7 +45,7 @@ jobs:
                  -v
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           file: ./coverage.xml
           flags: unittests
@@ -112,7 +112,7 @@ jobs:
         run: npm run test:coverage
 
       - name: Upload JS coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           file: ./coverage/lcov.info
           flags: javascript
