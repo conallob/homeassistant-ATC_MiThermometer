@@ -9,3 +9,5 @@ bleak>=0.21.0
 bleak-retry-connector>=3.0.0
 pyserial>=3.5
 packaging>=23.0
+# Time zone database for the HA test fixtures (US/Pacific); not present on all runners
+tzdata
